@@ -55,11 +55,15 @@ def _shoelace(ring) -> float:
     return abs(s) / 2.0
 
 
+def utm_epsg(lon: float, lat: float) -> int:
+    """EPSG code of the UTM zone containing the point (326xx north, 327xx south)."""
+    zone = int((lon + 180) // 6) % 60 + 1
+    return (32600 if lat >= 0 else 32700) + zone
+
+
 def area_km2(geometry: dict) -> float:
     minx, miny, maxx, maxy = _bbox(geometry)
-    lon, lat = (minx + maxx) / 2, (miny + maxy) / 2
-    zone = int((lon + 180) // 6) % 60 + 1
-    crs = f"EPSG:{(32600 if lat >= 0 else 32700) + zone}"
+    crs = f"EPSG:{utm_epsg((minx + maxx) / 2, (miny + maxy) / 2)}"
     g = transform_geom("EPSG:4326", crs, geometry)
     total = 0.0
     for poly in _rings(g):
