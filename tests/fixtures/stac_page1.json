@@ -1,0 +1,180 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": "S2B_23KMQ_20250205_0_L2A",
+   "bbox": [
+    -47.5,
+    -23.6,
+    -46.6,
+    -22.7
+   ],
+   "properties": {
+    "datetime": "2025-02-05T13:10:11.024000Z",
+    "eo:cloud_cover": 12.5,
+    "proj:epsg": 32723,
+    "s2:mgrs_tile": "23KMQ"
+   },
+   "links": [
+    {
+     "rel": "self",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_23KMQ_20250205_0_L2A"
+    }
+   ],
+   "assets": {
+    "blue": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMQ_20250205_0_L2A/blue.tif",
+     "type": "image/tiff"
+    },
+    "green": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMQ_20250205_0_L2A/green.tif",
+     "type": "image/tiff"
+    },
+    "red": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMQ_20250205_0_L2A/red.tif",
+     "type": "image/tiff"
+    },
+    "nir": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMQ_20250205_0_L2A/nir.tif",
+     "type": "image/tiff"
+    },
+    "swir16": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMQ_20250205_0_L2A/swir16.tif",
+     "type": "image/tiff"
+    },
+    "swir22": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMQ_20250205_0_L2A/swir22.tif",
+     "type": "image/tiff"
+    },
+    "scl": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMQ_20250205_0_L2A/scl.tif",
+     "type": "image/tiff"
+    },
+    "thumbnail": {
+     "href": "https://example.test/S2B_23KMQ_20250205_0_L2A.jpg"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "S2B_23KMR_20250205_0_L2A",
+   "bbox": [
+    -47.5,
+    -23.6,
+    -46.6,
+    -22.7
+   ],
+   "properties": {
+    "datetime": "2025-02-05T13:10:05.331000Z",
+    "eo:cloud_cover": 3.0,
+    "proj:epsg": 32723,
+    "s2:mgrs_tile": "23KMR"
+   },
+   "links": [
+    {
+     "rel": "self",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_23KMR_20250205_0_L2A"
+    }
+   ],
+   "assets": {
+    "blue": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMR_20250205_0_L2A/blue.tif",
+     "type": "image/tiff"
+    },
+    "green": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMR_20250205_0_L2A/green.tif",
+     "type": "image/tiff"
+    },
+    "red": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMR_20250205_0_L2A/red.tif",
+     "type": "image/tiff"
+    },
+    "nir": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMR_20250205_0_L2A/nir.tif",
+     "type": "image/tiff"
+    },
+    "swir16": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMR_20250205_0_L2A/swir16.tif",
+     "type": "image/tiff"
+    },
+    "swir22": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMR_20250205_0_L2A/swir22.tif",
+     "type": "image/tiff"
+    },
+    "scl": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2B_23KMR_20250205_0_L2A/scl.tif",
+     "type": "image/tiff"
+    },
+    "thumbnail": {
+     "href": "https://example.test/S2B_23KMR_20250205_0_L2A.jpg"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "S2A_23KMQ_20250210_0_L2A",
+   "bbox": [
+    -47.5,
+    -23.6,
+    -46.6,
+    -22.7
+   ],
+   "properties": {
+    "datetime": "2025-02-10T13:10:09.800000Z",
+    "eo:cloud_cover": 40.2,
+    "proj:epsg": 32723,
+    "s2:mgrs_tile": "23KMQ"
+   },
+   "links": [
+    {
+     "rel": "self",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2A_23KMQ_20250210_0_L2A"
+    }
+   ],
+   "assets": {
+    "blue": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2A_23KMQ_20250210_0_L2A/blue.tif",
+     "type": "image/tiff"
+    },
+    "green": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2A_23KMQ_20250210_0_L2A/green.tif",
+     "type": "image/tiff"
+    },
+    "red": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2A_23KMQ_20250210_0_L2A/red.tif",
+     "type": "image/tiff"
+    },
+    "nir": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2A_23KMQ_20250210_0_L2A/nir.tif",
+     "type": "image/tiff"
+    },
+    "swir16": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2A_23KMQ_20250210_0_L2A/swir16.tif",
+     "type": "image/tiff"
+    },
+    "swir22": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2A_23KMQ_20250210_0_L2A/swir22.tif",
+     "type": "image/tiff"
+    },
+    "scl": {
+     "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/S2A_23KMQ_20250210_0_L2A/scl.tif",
+     "type": "image/tiff"
+    },
+    "thumbnail": {
+     "href": "https://example.test/S2A_23KMQ_20250210_0_L2A.jpg"
+    }
+   }
+  }
+ ],
+ "links": [
+  {
+   "rel": "next",
+   "method": "POST",
+   "href": "https://earth-search.aws.element84.com/v1/search",
+   "body": {
+    "next": "token-page-2"
+   }
+  }
+ ]
+}
