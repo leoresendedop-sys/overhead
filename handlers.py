@@ -72,7 +72,8 @@ def _aoi(args: dict, cache_dir: Path):
 
 
 def _place(result: dict) -> dict:
-    return {"name": result["place"]["name"], "area_km2": result["place"]["area_km2"]}
+    place = result["place"]
+    return {"name": place["name"], "full_name": place["full_name"], "area_km2": place["area_km2"]}
 
 
 def _side(side: dict) -> dict:
@@ -108,8 +109,9 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
 
     def locate(args: dict):
         aoi = _aoi(args, cache_dir)
-        return _json({"name": aoi.name, "bbox": list(aoi.bbox), "area_km2": aoi.area_km2,
-                      "source": aoi.source, "resolution_m": resolution_for_area(aoi.area_km2)})
+        return _json({"name": aoi.name, "full_name": aoi.full_name or aoi.name,
+                      "bbox": list(aoi.bbox), "area_km2": aoi.area_km2, "source": aoi.source,
+                      "resolution_m": resolution_for_area(aoi.area_km2)})
 
     def scenes(args: dict):
         start, end = _range(args, "start", "end", "end must be after start.")

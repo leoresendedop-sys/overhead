@@ -130,6 +130,9 @@ def test_compare_text_when_no_vision(tools):
     assert data["resolution_m"] == 10 and data["stats"]["burn"]["high_ha"] >= 0
     assert data["before"]["date"] == "2024-12-17" and data["after"]["clear_fraction"] == 1.0
     assert data["run_id"].startswith("compare-") and data["notes"]
+    assert set(data["place"]) == {"name", "full_name", "area_km2"} and data["place"]["full_name"] == "Testville"
+    assert data["stats"]["burn"]["burned_ha"] == round(
+        data["stats"]["burn"]["moderate_ha"] + data["stats"]["burn"]["high_ha"], 2)
     assert "provenance" not in data and "thresholds" not in data  # kept in result.json
 
 
@@ -151,6 +154,7 @@ def test_point_with_place_uses_place_as_title(plugin, tmp_path):
         {"place": "Altadena, California", "lat": 34.19, "lon": -118.13, "radius_km": 2})
     data = json.loads(loc)
     assert data["name"] == "Altadena, California" and data["source"] == "point"
+    assert data["full_name"] == "Altadena, California"
     assert data["resolution_m"] == 10 and 15 < data["area_km2"] < 17 and len(data["bbox"]) == 4
 
 
@@ -178,6 +182,11 @@ def test_schemas_bound_the_place_numbers_and_ask_for_result_numbers(plugin):
         assert (props["lat"]["minimum"], props["lat"]["maximum"]) == (-90, 90)
         assert (props["lon"]["minimum"], props["lon"]["maximum"]) == (-180, 180)
         assert "only numbers to report" in schema["description"]
+    compare = plugin.schemas.COMPARE["description"]
+    assert "Report `headline` and the stats exactly as given." in compare
+    assert "Never add, subtract or recompute figures." in compare
+    assert "`burn.low_ha` is low-severity change (often seasonal or urban noise) and is NOT " \
+           "counted as burned." in compare
 
 
 def test_timelapse_delivers_gif_with_first_and_last_frame(tools, h, monkeypatch):

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 DATES = "Dates are YYYY-MM-DD or YYYY-MM (a month means its 15th), from 2017-03-28 to today."
 NUMBERS = "The numbers in the result are the only numbers to report; never estimate your own."
+STATS = ("Report `headline` and the stats exactly as given. Never add, subtract or recompute "
+         "figures. `burn.low_ha` is low-severity change (often seasonal or urban noise) and is NOT "
+         "counted as burned.")
 DELIVER = ("The result's instruction gives a line MEDIA:<path>: end your reply with exactly that "
            "line, on a line of its own (not in code or quotes), so the image reaches the user.")
 
@@ -79,8 +82,8 @@ COMPARE = _schema(
     "near each date and returns hectares of vegetation lost/gained, burned area by severity and "
     "water gained/lost, plus a before | after | change panel image. Use it for 'what changed', "
     "'how much burned', 'was forest cleared'. For a trend over many dates use overhead_timelapse. "
-    + WHERE + " " + DATES + " " + NUMBERS + " Always state the confidence and the resolution. "
-    + DELIVER,
+    + WHERE + " " + DATES + " " + NUMBERS + " " + STATS
+    + " Always state the confidence and the resolution. " + DELIVER,
     {
         "before": _date("Date before the change"),
         "after": _date("Date after the change"),

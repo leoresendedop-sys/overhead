@@ -34,8 +34,10 @@ image every few days since 2017). Every answer is backed by a tool result. Never
 
 ## Report the result
 
-1. Lead with the `headline`. Quote only numbers that appear in the result (hectares, dates,
-   clear fractions). Do not convert, round further or add your own estimates.
+1. Lead with the `headline`. Report `headline` and the stats exactly as given. Never add,
+   subtract or recompute figures: the totals are ready-made (`burn.burned_ha`,
+   `vegetation.net_ha`, `water.net_ha`). `burn.low_ha` is low-severity change (often seasonal or
+   urban noise) and is NOT counted as burned.
 2. Always state the `resolution_m` and pass on every item in `notes`. For a compare, also state
    the `confidence`.
 3. For a compare, say which image dates were used (`before.date`, `after.date`); they can differ
