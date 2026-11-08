@@ -1,0 +1,97 @@
+{
+  "run_id": "timelapse-20261108-27e5ae",
+  "kind": "timelapse",
+  "place": {
+    "name": "Manaus, Brazil",
+    "full_name": "Manaus, Brazil",
+    "bbox": [
+      -60.33509584164921,
+      -3.2348981518953193,
+      -60.06490415835079,
+      -2.965101848104681
+    ],
+    "area_km2": 897.4,
+    "source": "point"
+  },
+  "resolution_m": 20,
+  "metric": "water",
+  "series": [
+    {
+      "period": "2024-06",
+      "date": null,
+      "value": null,
+      "clear": null
+    },
+    {
+      "period": "2024-07",
+      "date": "2024-07-08",
+      "value": 22165.04,
+      "clear": 0.99
+    },
+    {
+      "period": "2024-08",
+      "date": "2024-08-07",
+      "value": 22151.0,
+      "clear": 1.0
+    },
+    {
+      "period": "2024-09",
+      "date": "2024-09-01",
+      "value": 19554.28,
+      "clear": 0.97
+    },
+    {
+      "period": "2024-10",
+      "date": "2024-10-11",
+      "value": 7493.4,
+      "clear": 0.9,
+      "flag": "glint"
+    },
+    {
+      "period": "2024-11",
+      "date": "2024-11-30",
+      "value": 14342.16,
+      "clear": 0.76
+    },
+    {
+      "period": "2024-12",
+      "date": null,
+      "value": null,
+      "clear": null
+    }
+  ],
+  "headline": "Water area ranged from 14,342 ha (Nov 2024) to 22,165 ha (Jul 2024) over 7 months.",
+  "files": {
+    "gif": "/home/user/.hermes/plugin-data/overhead/runs/timelapse-20261108-27e5ae/timelapse.gif",
+    "chart": "/home/user/.hermes/plugin-data/overhead/runs/timelapse-20261108-27e5ae/chart.png",
+    "frames": [
+      "/home/user/.hermes/plugin-data/overhead/runs/timelapse-20261108-27e5ae/frames/000.jpg",
+      "/home/user/.hermes/plugin-data/overhead/runs/timelapse-20261108-27e5ae/frames/001.jpg",
+      "/home/user/.hermes/plugin-data/overhead/runs/timelapse-20261108-27e5ae/frames/002.jpg",
+      "/home/user/.hermes/plugin-data/overhead/runs/timelapse-20261108-27e5ae/frames/003.jpg",
+      "/home/user/.hermes/plugin-data/overhead/runs/timelapse-20261108-27e5ae/frames/004.jpg"
+    ]
+  },
+  "provenance": {
+    "collection": "sentinel-2-l2a",
+    "stac": "https://earth-search.aws.element84.com/v1",
+    "items": [
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2A_20MRB_20240708_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2A_20MQB_20240708_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2A_20MRB_20240807_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2A_20MQB_20240807_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_20MRB_20240901_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_20MQB_20240901_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_20MRB_20241011_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_20MQB_20241011_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_20MRB_20241130_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_20MQB_20241130_0_L2A"
+    ]
+  },
+  "notes": [
+    "Resolution 20 m: objects smaller than ~40 m are not visible.",
+    "Large area: analysed at 20 m; small changes may be missed.",
+    "2 of 7 periods had no clear image and are left out of the animation.",
+    "Sun glint or smoke haze over water on 2024-10-11: water area there is likely underestimated."
+  ]
+}

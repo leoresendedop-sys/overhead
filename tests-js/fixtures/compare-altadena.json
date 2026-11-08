@@ -1,0 +1,96 @@
+{
+  "run_id": "compare-20261108-1fbafb",
+  "kind": "compare",
+  "place": {
+    "name": "Altadena, California",
+    "full_name": "Altadena, California",
+    "bbox": [
+      -118.17524063366554,
+      34.146040739241876,
+      -118.04475936633446,
+      34.25395926075813
+    ],
+    "area_km2": 143.9,
+    "source": "point"
+  },
+  "before": {
+    "requested": "2024-12-15",
+    "date": "2024-12-18",
+    "scenes": [
+      "S2B_11SMU_20241218_0_L2A",
+      "S2B_11SLU_20241218_0_L2A",
+      "S2B_11SMT_20241218_0_L2A",
+      "S2B_11SLT_20241218_0_L2A"
+    ],
+    "composite": false,
+    "clear_fraction": 1.0
+  },
+  "after": {
+    "requested": "2025-02-15",
+    "date": "2025-02-21",
+    "scenes": [
+      "S2C_11SMU_20250221_0_L2A",
+      "S2C_11SLU_20250221_0_L2A",
+      "S2C_11SMT_20250221_0_L2A",
+      "S2C_11SLT_20250221_0_L2A"
+    ],
+    "composite": false,
+    "clear_fraction": 1.0
+  },
+  "resolution_m": 10,
+  "focus": "burn",
+  "stats": {
+    "vegetation": {
+      "lost_ha": 2845.76,
+      "gained_ha": 32.62,
+      "net_ha": -2813.14
+    },
+    "burn": {
+      "low_ha": 2266.87,
+      "moderate_ha": 2539.55,
+      "high_ha": 909.89,
+      "burned_ha": 3449.44
+    },
+    "water": {
+      "before_ha": 164.73,
+      "after_ha": 195.1,
+      "lost_ha": 59.38,
+      "gained_ha": 89.75,
+      "net_ha": 30.37
+    }
+  },
+  "valid_fraction": 1.0,
+  "confidence": "high",
+  "thresholds": {
+    "veg_min": 0.5,
+    "veg_delta": 0.25,
+    "dnbr_low": 0.1,
+    "dnbr_moderate": 0.27,
+    "dnbr_high": 0.66,
+    "water_mndwi": 0.0
+  },
+  "headline": "≈ 3,449 ha burned (910 ha high severity) between 18 Dec 2024 and 21 Feb 2025",
+  "files": {
+    "panel": "/home/user/.hermes/plugin-data/overhead/runs/compare-20261108-1fbafb/panel.png",
+    "before": "/home/user/.hermes/plugin-data/overhead/runs/compare-20261108-1fbafb/before.jpg",
+    "after": "/home/user/.hermes/plugin-data/overhead/runs/compare-20261108-1fbafb/after.jpg",
+    "overlay": "/home/user/.hermes/plugin-data/overhead/runs/compare-20261108-1fbafb/overlay.png"
+  },
+  "provenance": {
+    "collection": "sentinel-2-l2a",
+    "stac": "https://earth-search.aws.element84.com/v1",
+    "items": [
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_11SMU_20241218_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_11SLU_20241218_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_11SMT_20241218_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_11SLT_20241218_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2C_11SMU_20250221_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2C_11SLU_20250221_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2C_11SMT_20250221_0_L2A",
+      "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2C_11SLT_20250221_0_L2A"
+    ]
+  },
+  "notes": [
+    "Resolution 10 m: objects smaller than ~20 m are not visible."
+  ]
+}
