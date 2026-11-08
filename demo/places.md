@@ -18,6 +18,12 @@ Re-run on 8 Nov 2026, after the STAC search switched from the area's polygon to 
 and range months started covering the whole month: the same dates and headlines for all three
 scenes, warm 0.3 s, 0.6 s and 1.3 s. The cold times below are from the first measurement.
 
+Re-run again on 8 Nov 2026 after the final fixes (compare windows split at the midpoint, one
+STAC search per timelapse period, resolution from the UTM grid, timelapse GIF at most 800 px):
+the same dates, resolutions and headlines for all three scenes. Cold, in a fresh data folder:
+114 s, 50 s and 38 s. Warm: 0.3 s, 0.6 s and 0.9 s. Cold times swing with the network: the same
+Altadena compare has taken 42 s, 99 s and 114 s.
+
 ## 1. Eaton fire, Altadena, California (burn)
 
 **Prompt**
@@ -31,7 +37,7 @@ scenes, warm 0.3 s, 0.6 s and 1.3 s. The cold times below are from the first mea
 **Dates picked:** 18 Dec 2024 and 21 Feb 2025, both 100% clear, confidence high, 10 m.
 **Headline:** about 3,449 ha burned (910 ha high severity). The panel title is the place label.
 **Files:** `panel.png`, `before.jpg`, `after.jpg`, `overlay.png`.
-**Timing:** cold 42 s (an earlier cold run took 99 s), warm 0.3 s.
+**Timing:** cold 42 s (other cold runs took 99 s and 114 s), warm 0.3 s.
 
 Why a point and not the place name: `place: "Altadena, California"` alone resolves to the census
 polygon of the town (21 km2), which gives about 499 ha burned and misses the burned chaparral
@@ -54,7 +60,7 @@ at the bottom of the frame, which tells the story best.
 **Dates picked:** 31 Jul 2019 (98% clear) and 29 Jul 2025 (100% clear), confidence high, 10 m.
 **Headline:** about 3,718 ha of vegetation lost and 243 ha gained.
 **Files:** `panel.png`, `before.jpg`, `after.jpg`, `overlay.png`.
-**Timing:** cold 67 s (another run 56 s), warm 0.6 s.
+**Timing:** cold 67 s (other runs 56 s and 50 s), warm 0.6 s.
 
 Why a point: the place name resolves to the whole municipality
 (about 3.8 million ha, 175,000 ha "burned" at 80 m), which is useless as a picture. The point
@@ -74,8 +80,8 @@ gives the town and the cleared pasture around it. The label keeps its accent: pa
 months cover the whole month, but the best June date is 57% clear (13 Jun) and the best December
 date 55% (5 Dec), under the timelapse's 60% bar, so those two periods are left out.
 **Headline:** water area ranged from 14,342 ha (Nov 2024) to 22,165 ha (Jul 2024) over 7 months. The October point (7,493 ha) is sun-glint affected, so the headline skips it; the chart draws it as a hollow marker and the notes say it is likely underestimated.
-**Files:** `timelapse.gif`, `chart.png`, `frames/000.jpg` ... `frames/004.jpg`.
-**Timing:** cold 55 s, warm 1.3 s.
+**Files:** `timelapse.gif` (at most 800 px a side), `chart.png`, `frames/000.jpg` ... `frames/004.jpg`.
+**Timing:** cold 55 s (another run 38 s), warm 0.9 s (1.3 s before the GIF was capped at 800 px).
 
 The first try (lat -3.06, lon -60.1) also passed, with a minimum in Oct 2024 (10,720 ha) against
 21,036 ha in Aug, but its frames were partly cloudy (June 63% clear) and its east edge hit the

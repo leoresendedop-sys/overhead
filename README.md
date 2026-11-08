@@ -59,11 +59,12 @@ shown here.
 
 | Scene | Tool | Image dates used | Result | First run / repeat |
 |---|---|---|---|---|
-| Eaton fire, Altadena | `overhead_compare` | 18 Dec 2024, 21 Feb 2025 (100% clear) | ≈ 3,449 ha burned (910 ha high severity) | 42 s / 0.3 s |
-| Clearing near Novo Progresso, Pará | `overhead_compare` | 31 Jul 2019 (98% clear), 29 Jul 2025 (100%) | ≈ 3,718 ha of vegetation lost, 243 ha gained | 67 s / 0.6 s |
-| Rio Negro drought at Manaus | `overhead_timelapse` | 5 clear months from Jul to Nov 2024 | Water area from 22,165 ha (Jul) down to 14,342 ha (Nov) | 55 s / 1.3 s |
+| Eaton fire, Altadena | `overhead_compare` | 18 Dec 2024, 21 Feb 2025 (100% clear) | ≈ 3,449 ha burned (910 ha high severity) | 42–114 s / 0.3 s |
+| Clearing near Novo Progresso, Pará | `overhead_compare` | 31 Jul 2019 (98% clear), 29 Jul 2025 (100%) | ≈ 3,718 ha of vegetation lost, 243 ha gained | 50–67 s / 0.6 s |
+| Rio Negro drought at Manaus | `overhead_timelapse` | 5 clear months from Jul to Nov 2024 | Water area from 22,165 ha (Jul) down to 14,342 ha (Nov) | 38–55 s / 0.9 s |
 
-Times are from one Apple-silicon Mac on home broadband.
+Times are from one Apple-silicon Mac on home broadband. First runs swing with the network: the
+range is the fastest and slowest cold run measured.
 
 ![Before, after and vegetation change panel near Novo Progresso, Pará, Brazil](assets/novo-progresso-vegetation.jpg)
 
@@ -248,7 +249,7 @@ Place names and boundaries: © OpenStreetMap contributors, under the
 ## Development
 
 ```bash
-python -m pytest -q                                         # 235 offline unit tests
+python -m pytest -q                                         # 236 offline unit tests
 OVERHEAD_LIVE=1 python -m pytest tests/test_live.py -s      # the three demo scenes on live data
 npm ci && npm test && npm run typecheck && npm run build    # Desktop card: 31 tests, desktop/plugin.js
 hermes plugins validate .
