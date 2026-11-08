@@ -222,10 +222,19 @@ def _fail(area: _Area, target: date, side: str, cache_dir, search, reader, pool)
     raise NoClearScene(msg, suggestions=sugg, side=side, target=target.isoformat())
 
 
-def _rank_side(area: _Area, target: date, side: str, window: int, cache_dir, search, reader, pool) -> dict:
-    """Search and rank one side with coarse SCL only; decides single scene vs composite."""
-    scenes = search(area.aoi, target - timedelta(days=window),
-                    min(target + timedelta(days=window), date.today()), cache_dir)
+def _side_windows(before: date, after: date, window_days: int) -> dict[str, tuple[date, date]]:
+    """Each side's search window: +-window_days around its date, split at the midpoint so the two
+    never overlap (a scene can then never serve as both before and after, or in reverse order)."""
+    w = timedelta(days=window_days)
+    mid = before + timedelta(days=(after - before).days // 2)
+    return {"before": (before - w, min(before + w, mid)),
+            "after": (max(after - w, mid + timedelta(days=1)), min(after + w, date.today()))}
+
+
+def _rank_side(area: _Area, target: date, side: str, window: tuple[date, date], cache_dir, search,
+               reader, pool) -> dict:
+    """Search one side's window and rank it with coarse SCL only; decides single scene vs composite."""
+    scenes = search(area.aoi, window[0], window[1], cache_dir)
     groups = group_by_date(scenes)
     if not groups:
         _fail(area, target, side, cache_dir, search, reader, pool)
@@ -276,12 +285,20 @@ def run_compare(aoi: AOI, before: date, after: date, focus: str, window_days: in
     if isinstance(window_days, bool) or not isinstance(window_days, int) or not 1 <= window_days <= 120:
         raise BadInput("window_days must be a whole number of days between 1 and 120.")
     area = _Area(aoi)
+    windows = _side_windows(before, after, window_days)
     with ThreadPoolExecutor(2) as side_pool, ThreadPoolExecutor(WORKERS) as pool:
-        futs = [side_pool.submit(_rank_side, area, t, side, window_days, cache_dir, search, reader, pool)
+        futs = [side_pool.submit(_rank_side, area, t, side, windows[side], cache_dir, search, reader,
+                                 pool)
                 for t, side in ((before, "before"), (after, "after"))]
         plans = []
         for f in futs:  # before's failure is reported first
             plans.append(f.result())
+        if max(plans[0]["use"]) >= min(plans[1]["use"]):  # final guard, before any full read
+            raise NoClearScene(
+                f"The clear images found for before ({', '.join(plans[0]['use'])}) are not earlier "
+                f"than those for after ({', '.join(plans[1]['use'])}), so no change can be "
+                "measured. Choose dates further apart, or call overhead_scenes to pick them.",
+                suggestions=[], side="both", target=before.isoformat())
         # full-resolution reads of both sides at once (the readers share one HTTP pool)
         jobs = [(p["side"], d) for p in plans for d in p["use"]]
         reads = [pool.submit(reader, plans[0 if side == "before" else 1]["groups"][d], area.grid,

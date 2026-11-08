@@ -439,3 +439,63 @@ def test_timelapse_headline_uses_all_points_when_too_few_clean():
     s = _series((20000.0, False), (7000.0, True), (9000.0, True))
     h = timelapse_headline(s, "water", "month", 3)
     assert "7,000 ha" in h and h.endswith("(some dates affected by sun glint or haze)")
+
+
+# ---------------------------------------------------------------- before/after windows (F2)
+
+class Recording:
+    """Search wrapper that records each (start, end, keyword arguments) call."""
+    def __init__(self, inner):
+        self.inner, self.calls = inner, []
+
+    def __call__(self, aoi, start, end, cache_dir, **kw):
+        self.calls.append((start, end, kw))
+        return self.inner(aoi, start, end, cache_dir, **kw)
+
+
+def test_compare_close_dates_never_take_an_after_scene_for_before(tmp_cache, tmp_path):
+    # Fire on 7 Jan; the only clear scenes are after it. Each side used to search its own
+    # +-30 days, so before picked 12 Jan (post-fire) and the burn vanished, at high confidence.
+    scenes = [scene("2024-12-27"), scene("2025-01-01"), scene("2025-01-12"), scene("2025-01-17")]
+    clear = {"2024-12-27": 0.2, "2025-01-01": 0.25, "2025-01-12": 1.0, "2025-01-17": 1.0}
+    search = Recording(make_search(scenes))
+    r = run_compare(AOI, date(2025, 1, 1), date(2025, 1, 20), "auto", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=search,
+                    reader=make_reader(clear, burn_from="2025-01-07"))
+    assert r["before"]["date"] < "2025-01-07" < r["after"]["date"]
+    assert r["focus"] == "burn" and r["stats"]["burn"]["burned_ha"] > 0
+    windows = {(s, e) for s, e, _ in search.calls}
+    assert (date(2024, 12, 2), date(2025, 1, 10)) in windows  # before: up to the midpoint
+    assert (date(2025, 1, 11), date(2025, 2, 19)) in windows  # after: from the day after it
+
+
+def test_compare_never_uses_one_scene_for_both_sides(tmp_cache, tmp_path):
+    # Wet season, one usable scene (14 Jan): it used to be both before and after, "between
+    # 14 Jan 2025 and 14 Jan 2025", confidence high.
+    scenes = [scene("2024-12-20"), scene("2025-01-02"), scene("2025-01-14"), scene("2025-01-27")]
+    clear = {"2024-12-20": 0.4, "2025-01-02": 0.5, "2025-01-14": 0.9, "2025-01-27": 0.45}
+    r = run_compare(AOI, date(2025, 1, 1), date(2025, 1, 25), "auto", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=make_search(scenes),
+                    reader=make_reader(clear, burn_from="2025-01-10"))
+    assert r["before"]["date"] < r["after"]["date"]
+    assert not set(r["before"]["scenes"]) & set(r["after"]["scenes"])
+    assert "between 14 Jan 2025 and 14 Jan 2025" not in r["headline"]
+
+
+def test_compare_refuses_scenes_out_of_order(tmp_cache, tmp_path):
+    """Final guard: whatever the search returns, before must be earlier than after."""
+    everything = [scene("2025-01-14")]
+    with pytest.raises(NoClearScene) as e:
+        run_compare(AOI, date(2025, 1, 1), date(2025, 1, 25), "auto", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=lambda *a, **k: list(everything),
+                    reader=make_reader({}))
+    assert "not earlier" in e.value.message and "overhead_scenes" in e.value.message
+
+
+def test_compare_windows_far_apart_are_the_full_window(tmp_cache, tmp_path):
+    """The demo dates are two months apart: each side keeps its whole +-window_days."""
+    search = Recording(make_search([scene("2024-12-17"), scene("2025-02-14")]))
+    run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "auto", 30, tmp_cache,
+                RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
+    assert [(s, e) for s, e, _ in search.calls] == [
+        (date(2024, 11, 15), date(2025, 1, 14)), (date(2025, 1, 16), date(2025, 3, 17))]
