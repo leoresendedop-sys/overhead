@@ -87,7 +87,8 @@ const plugin: HermesPlugin = {
     const rest: Rest = (path, opts) => ctx.rest(path, opts)
     const openExternal: OpenExternal = typeof ctx.os?.openExternal === 'function'
       ? url => {
-          void ctx.os.openExternal(url).catch(() => false)
+          // Guards a synchronous throw and a non-promise return as well as a rejection.
+          Promise.resolve().then(() => ctx.os.openExternal(url)).catch(() => {})
         }
       : null
     ctx.register({

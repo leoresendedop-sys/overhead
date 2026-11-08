@@ -41,7 +41,6 @@ const CSS = `
   --ovh-yellow:var(--ui-yellow,#c08532);
   --ovh-stage:color-mix(in srgb,var(--ovh-fg) 7%,transparent);
   box-sizing:border-box;display:block;width:100%;max-width:720px;margin:2px 0;
-  container-type:inline-size;
   background:var(--ovh-surface);color:var(--ovh-fg);
   border:1px solid var(--ovh-hairline);border-radius:12px;
   font-family:inherit;font-size:13px;line-height:1.45;text-align:start;
@@ -54,7 +53,7 @@ const CSS = `
 .ovh-title{margin:0;font-size:15px;font-weight:600;line-height:1.3;letter-spacing:-.005em;color:var(--ovh-fg)}
 .ovh-dates{font-size:12.5px;color:var(--ovh-fg2);font-variant-numeric:tabular-nums;white-space:nowrap}
 .ovh-body{display:grid;gap:14px;padding:0 14px 14px}
-@container (min-width:600px){.ovh-body{grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start}}
+.ovh-card[data-wide] .ovh-body{grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start}
 .ovh-media{min-width:0}
 .ovh-aside{display:flex;flex-direction:column;gap:12px;min-width:0}
 .ovh-headline{margin:0;font-size:14px;font-weight:500;line-height:1.45;color:var(--ovh-fg);text-wrap:pretty}
@@ -183,6 +182,7 @@ export function WarnIcon() {
 // ---------------------------------------------------------------------------------------- shell
 
 const TONE_COLOR = { loss: '#E5484D', gain: '#30A46C' } as const
+const WATER_COLOR = { loss: '#F76B15', gain: '#0090FF' } as const // the panel's water palette
 
 export function Chips({ chips, focus }: { chips: Chip[]; focus?: string }) {
   if (!chips.length) return null
@@ -192,7 +192,7 @@ export function Chips({ chips, focus }: { chips: Chip[]; focus?: string }) {
         <span className="ovh-chip" data-tone={chip.tone} key={chip.label}>
           {chip.tone !== 'neutral' && (
             <i className="ovh-dot" style={{
-              background: chip.tone === 'gain' && focus === 'water' ? '#0090FF' : TONE_COLOR[chip.tone]
+              background: (focus === 'water' ? WATER_COLOR : TONE_COLOR)[chip.tone]
             }} />
           )}
           {chip.label}
@@ -202,6 +202,11 @@ export function Chips({ chips, focus }: { chips: Chip[]; focus?: string }) {
   )
 }
 
+/** Two columns (media | headline and chips) from this card width up, measured with a ResizeObserver.
+ *  Not a container query: `container-type: inline-size` gives the card no intrinsic width, so a
+ *  shrink-to-fit host could collapse it to zero. */
+const WIDE = 600
+
 /** The card root: scoped styles, header, then the body the card draws. `not-prose` opts the card out
  *  of the transcript's Tailwind Typography styles. */
 export function Shell({ r, label, children, busy }: {
@@ -210,8 +215,10 @@ export function Shell({ r, label, children, busy }: {
   children: ReactNode
   busy?: boolean
 }) {
+  const [ref, width] = useWidth(0)
   return (
-    <section className="ovh-card not-prose" aria-label={label} aria-busy={busy || undefined}>
+    <section className="ovh-card not-prose" ref={ref} data-wide={width >= WIDE || undefined}
+      aria-label={label} aria-busy={busy || undefined}>
       <style>{CSS}</style>
       <header className="ovh-head">
         <div className="ovh-eyebrow">{eyebrow(r)}</div>

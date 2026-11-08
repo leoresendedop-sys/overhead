@@ -47,7 +47,12 @@ function Swipe({ before, after, overlay, showChange, place, beforeDate, afterDat
     handle.current?.focus({ preventScroll: true })
   }
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (dragging) moveTo(e.clientX)
+    if (!dragging) return
+    if (!(e.buttons & 1)) {
+      setDragging(false) // the release happened where we did not hear it
+      return
+    }
+    moveTo(e.clientX)
   }
   const stop = () => setDragging(false)
 
