@@ -19,7 +19,8 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "overhead-hermes-plugin/0.1.0 (+https://github.com/leoresendedop-sys/overhead)"
 KM_PER_DEG = 111.195
 MAX_AREA_KM2 = 40000
-MAX_SIDE_PX = 2500
+MAX_SIDE_PX = 2600  # 2,500 px a side plus a little for the UTM rotation of a lat/lon square
+RESOLUTIONS = (10, 20, 40, 80)  # metres
 
 _last_request = 0.0  # wall-clock time of the last real Nominatim request
 
@@ -61,6 +62,25 @@ def utm_epsg(lon: float, lat: float) -> int:
     """EPSG code of the UTM zone containing the point (326xx north, 327xx south)."""
     zone = int((lon + 180) // 6) % 60 + 1
     return (32600 if lat >= 0 else 32700) + zone
+
+
+def utm_bounds(geometry: dict) -> tuple[int, float, float, float, float]:
+    """(EPSG, minx, miny, maxx, maxy): the geometry's bounds in metres, in the UTM zone of its
+    bounding-box centre (the zone the analysis grid uses)."""
+    minx, miny, maxx, maxy = _bbox(geometry)
+    epsg = utm_epsg((minx + maxx) / 2, (miny + maxy) / 2)
+    g = transform_geom("EPSG:4326", f"EPSG:{epsg}", geometry)
+    pts = [p for poly in _rings(g) for ring in poly for p in ring]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return epsg, min(xs), min(ys), max(xs), max(ys)
+
+
+def grid_shape(bounds: tuple, res: int) -> tuple[int, int]:
+    """(width, height) in pixels of the grid snapped to `res` that covers `bounds`."""
+    _, minx, miny, maxx, maxy = bounds
+    return (math.ceil(maxx / res) - math.floor(minx / res),
+            math.ceil(maxy / res) - math.floor(miny / res))
 
 
 def area_km2(geometry: dict) -> float:
@@ -238,13 +258,23 @@ def resolve_aoi(args: dict, cache_dir: Path) -> AOI:
     raise BadInput("Give a place name, lat and lon, or a GeoJSON polygon.")
 
 
-def resolution_for_area(area_km2: float) -> int:
-    if area_km2 > MAX_AREA_KM2:
+def resolution_for(aoi: AOI) -> int:
+    """The analysis resolution: the first of 10, 20, 40 and 80 m at which the area's UTM grid is at
+    most MAX_SIDE_PX a side. The grid, not the area, sets the memory a run needs: a long thin strip
+    or scattered polygons have a small area and a huge grid. Refuses areas over MAX_AREA_KM2, and
+    areas whose grid is too big even at 80 m."""
+    if aoi.area_km2 > MAX_AREA_KM2:
         raise AreaTooLarge(
-            f"The area is {area_km2:.0f} km2; the limit is {MAX_AREA_KM2} km2. Choose a smaller area."
+            f"The area is {aoi.area_km2:.0f} km2; the limit is {MAX_AREA_KM2} km2. Choose a smaller area."
         )
-    side_m = math.sqrt(area_km2) * 1000
-    res = 10
-    while side_m / res > MAX_SIDE_PX and res < 80:
-        res *= 2
-    return res
+    bounds = utm_bounds(aoi.geometry)
+    for res in RESOLUTIONS:
+        side = max(grid_shape(bounds, res))
+        if side <= MAX_SIDE_PX:
+            return res
+    _, minx, miny, maxx, maxy = bounds
+    raise AreaTooLarge(
+        f"The area spans {(maxx - minx) / 1000:.0f} km by {(maxy - miny) / 1000:.0f} km: even at "
+        f"{RESOLUTIONS[-1]} m its image would be {side:,} px a side, over the {MAX_SIDE_PX:,} px "
+        "limit. Choose a smaller or more compact area, or analyse its parts separately."
+    )

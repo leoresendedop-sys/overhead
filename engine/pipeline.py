@@ -26,7 +26,7 @@ from .analysis import (
     pick_focus,
     valid_mask,
 )
-from .aoi import AOI, resolution_for_area
+from .aoi import AOI, resolution_for
 from .errors import BadInput, NoClearScene
 from .raster import aoi_mask, grid_for_aoi, read_date_stack
 from .render import (
@@ -101,7 +101,7 @@ class _Area:
 
     def __init__(self, aoi: AOI):
         self.aoi = aoi
-        self.res = resolution_for_area(aoi.area_km2)
+        self.res = resolution_for(aoi)
         self.grid = grid_for_aoi(aoi, self.res)
         self.mask = aoi_mask(aoi, self.grid)
         self.pixel_ha = self.res * self.res / 10000

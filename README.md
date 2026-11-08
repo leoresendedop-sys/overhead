@@ -157,8 +157,11 @@ anything fails. The card is built from `src/` into `desktop/plugin.js` and impor
      timelapse avoids those dates when it can, and both tools flag the ones they use.
    - `focus: auto` headlines whichever change covers the most hectares.
 5. **Confidence and resolution.** Confidence is "low" when less than 70% of the area is clear on
-   both dates. Areas up to 625 km² are analysed at the native 10 m. Larger areas use 20, 40 or
-   80 m, so that the image side stays within 2,500 px. Areas over 40,000 km² are refused.
+   both dates. The analysis grid stays within about 2,600 px a side: the native 10 m when the
+   area's grid fits (a square up to about 25 km across), otherwise the first of 20, 40 or 80 m
+   that fits. The grid, not the area, decides: a long thin strip or scattered polygons can need a
+   coarse grid, or be refused, even when their area is small. Areas that do not fit at 80 m
+   (about 200 km across), or are over 40,000 km², are refused.
 
 **Numbers are computed, not guessed.** Each result carries a one-line `headline` and ready-made
 totals (`burn.burned_ha`, `vegetation.net_ha`, `water.net_ha`). The tool descriptions and the skill

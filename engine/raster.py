@@ -19,7 +19,7 @@ from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_geom
 
 from .fsutil import write_atomic
-from .aoi import AOI, _rings, utm_epsg
+from .aoi import AOI, grid_shape, utm_bounds, utm_epsg
 from .stac import Scene
 
 __all__ = [
@@ -70,18 +70,12 @@ class Grid:
 
 
 def grid_for_aoi(aoi: AOI, res: int) -> Grid:
-    minx, miny, maxx, maxy = aoi.bbox
-    epsg = utm_epsg((minx + maxx) / 2, (miny + maxy) / 2)
-    g = transform_geom("EPSG:4326", f"EPSG:{epsg}", aoi.geometry)
-    pts = [p for poly in _rings(g) for ring in poly for p in ring]
-    xs = [p[0] for p in pts]
-    ys = [p[1] for p in pts]
-    x0 = math.floor(min(xs) / res) * res
-    x1 = math.ceil(max(xs) / res) * res
-    y0 = math.floor(min(ys) / res) * res
-    y1 = math.ceil(max(ys) / res) * res
-    return Grid(epsg, (float(res), 0.0, float(x0), 0.0, -float(res), float(y1)),
-                int(round((x1 - x0) / res)), int(round((y1 - y0) / res)), res)
+    bounds = utm_bounds(aoi.geometry)
+    epsg, minx, _, _, maxy = bounds
+    width, height = grid_shape(bounds, res)
+    x0 = math.floor(minx / res) * res
+    y1 = math.ceil(maxy / res) * res
+    return Grid(epsg, (float(res), 0.0, float(x0), 0.0, -float(res), float(y1)), width, height, res)
 
 
 def aoi_mask(aoi: AOI, grid: Grid) -> np.ndarray:

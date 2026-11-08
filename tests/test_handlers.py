@@ -97,7 +97,7 @@ def test_compare_missing_date_is_bad_input(tools):
 
 
 CALLS = {
-    "overhead_locate": ({"place": "x"}, "resolution_for_area"),
+    "overhead_locate": ({"place": "x"}, "resolution_for"),
     "overhead_scenes": ({"place": "x", "start": "2024-01-01", "end": "2024-02-01"}, "run_scenes"),
     "overhead_compare": (COMPARE, "run_compare"),
     "overhead_timelapse": ({"place": "x", "start": "2024-01", "end": "2024-06"}, "run_timelapse"),
@@ -296,3 +296,12 @@ def test_scenes_passes_on_the_search_notes(h, tmp_path, monkeypatch):
     out = json.loads(h.make_handlers(tmp_path)["overhead_scenes"](
         {"place": "x", "start": "2024-01-01", "end": "2024-12-31"}))
     assert out["notes"] == [note]
+
+
+def test_locate_reports_the_grid_based_resolution(plugin, tmp_path):
+    from test_aoi import RIVER_STRIP, TWO_ISLANDS
+    tools = plugin.handlers.make_handlers(tmp_path)
+    strip = json.loads(tools["overhead_locate"]({"geojson": RIVER_STRIP}))
+    assert strip["resolution_m"] == 40
+    err = error_of(tools["overhead_locate"]({"geojson": TWO_ISLANDS}))
+    assert err["type"] == "area_too_large" and "2,600 px" in err["message"]

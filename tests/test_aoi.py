@@ -6,7 +6,6 @@ from engine.aoi import (
     aoi_from_geojson,
     aoi_from_point,
     geocode,
-    resolution_for_area,
     resolve_aoi,
 )
 from engine.errors import (
@@ -68,14 +67,59 @@ def test_geojson_point_rejected():
         aoi_from_geojson({"type": "Point", "coordinates": [0, 0]})
 
 
-@pytest.mark.parametrize("area,res", [(100, 10), (625, 10), (2500, 20), (10000, 40), (40000, 80)])
-def test_resolution_policy(area, res):
-    assert resolution_for_area(area) == res
+# A 1 km wide river reach running ~100 km diagonally (72 km2), and two 5 km islands 300 km apart
+# (a sparse MultiPolygon): small areas, huge grids. (Reviewer repro: size.py.)
+_W = 0.0045
+RIVER_STRIP = {"type": "Polygon", "coordinates": [[[-60.9, -3.6], [-60.9 + _W, -3.6 - _W],
+                                                   [-60.25 + _W, -2.95 - _W], [-60.25, -2.95],
+                                                   [-60.9, -3.6]]]}
+
+
+def _square(x, y):
+    return [[[x, y], [x + 0.045, y], [x + 0.045, y + 0.045], [x, y + 0.045], [x, y]]]
+
+
+TWO_ISLANDS = {"type": "MultiPolygon", "coordinates": [_square(-60.0, -3.0), _square(-57.3, -3.0)]}
+
+
+@pytest.mark.parametrize("lat,lon,radius,res", [
+    (34.2, -118.11, 6, 10), (-7.05, -55.4, 10, 10), (-3.1, -60.2, 15, 20),  # the demo squares
+    (0, -45, 12, 10), (0, -45, 13, 20), (0, -45, 25, 20), (0, -45, 50, 40), (0, -45, 100, 80),
+    (34.2, -118.11, 100, 80),
+])
+def test_resolution_policy_follows_the_grid(lat, lon, radius, res):
+    from engine.aoi import MAX_SIDE_PX, resolution_for
+    from engine.raster import grid_for_aoi
+    a = aoi_from_point(lat, lon, radius)
+    assert resolution_for(a) == res
+    g = grid_for_aoi(a, res)
+    assert max(g.width, g.height) <= MAX_SIDE_PX == 2600
+
+
+def test_resolution_of_a_long_thin_area_uses_its_grid_not_its_area():
+    from engine.aoi import resolution_for
+    from engine.raster import grid_for_aoi
+    strip = aoi_from_geojson(RIVER_STRIP)
+    assert strip.area_km2 < 100  # sqrt(area) said 10 m: a 7296 x 7225 grid, 53 Mpx a band
+    res = resolution_for(strip)
+    g = grid_for_aoi(strip, res)
+    assert res == 40 and max(g.width, g.height) <= 2600
+
+
+def test_sparse_multipolygon_that_fits_no_resolution_is_refused():
+    from engine.aoi import resolution_for
+    with pytest.raises(AreaTooLarge) as e:
+        resolution_for(aoi_from_geojson(TWO_ISLANDS))
+    msg = e.value.message
+    assert "2,600 px" in msg and "80 m" in msg and "smaller or more compact" in msg
 
 
 def test_resolution_too_large():
-    with pytest.raises(AreaTooLarge):
-        resolution_for_area(40001)
+    from engine.aoi import resolution_for
+    big = aoi_from_geojson({"type": "Polygon", "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]]})
+    with pytest.raises(AreaTooLarge) as e:
+        resolution_for(big)  # ~49,000 km2: over the area limit, whatever its grid
+    assert "40000 km2" in e.value.message
 
 
 def test_geocode_picks_dominant(tmp_cache):

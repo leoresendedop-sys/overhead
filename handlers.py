@@ -14,7 +14,7 @@ from typing import Callable
 
 from PIL import Image
 
-from .engine.aoi import resolution_for_area, resolve_aoi
+from .engine.aoi import resolution_for, resolve_aoi
 from .engine.errors import BadInput, OverheadError, to_error_dict
 from .engine.pipeline import parse_date, run_compare, run_scenes, run_timelapse
 from .engine.render import preview_data_url
@@ -115,7 +115,7 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
         aoi = _aoi(args, cache_dir)
         return _json({"name": aoi.name, "full_name": aoi.full_name or aoi.name,
                       "bbox": list(aoi.bbox), "area_km2": aoi.area_km2, "source": aoi.source,
-                      "resolution_m": resolution_for_area(aoi.area_km2)})
+                      "resolution_m": resolution_for(aoi)})
 
     def scenes(args: dict):
         start, end = _range(args, "start", "end", "end must be after start.")
