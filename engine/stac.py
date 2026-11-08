@@ -9,6 +9,7 @@ from datetime import date
 from pathlib import Path
 
 from .aoi import AOI, USER_AGENT
+from .fsutil import write_atomic
 from .http import post_json
 
 STAC_URL = "https://earth-search.aws.element84.com/v1"
@@ -110,8 +111,7 @@ def search_scenes(
     if features is None:
         features = _fetch_features(request, max_items, post)
         if cacheable:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(features), encoding="utf-8")
+            write_atomic(path, json.dumps(features).encode("utf-8"))
 
     scenes = [s for s in map(_parse, features) if s is not None]
     scenes.sort(key=lambda s: s.datetime)

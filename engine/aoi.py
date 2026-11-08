@@ -12,6 +12,7 @@ from pathlib import Path
 from rasterio.warp import transform_geom
 
 from .errors import AmbiguousPlace, AreaTooLarge, BadInput, PlaceNotFound
+from .fsutil import write_atomic
 from .http import get_json
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -149,7 +150,7 @@ def _fetch_results(query, cache_dir, fetch, sleep):
         results = fetch(NOMINATIM_URL, params, {"User-Agent": USER_AGENT}, timeout=30)
     finally:
         _last_request = time.time()
-    path.write_text(json.dumps(results))
+    write_atomic(path, json.dumps(results).encode("utf-8"))
     return results
 
 

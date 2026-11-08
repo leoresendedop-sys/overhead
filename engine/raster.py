@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import math
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -18,6 +18,7 @@ from rasterio.features import geometry_mask
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_geom
 
+from .fsutil import write_atomic
 from .aoi import AOI, _rings, utm_epsg
 from .stac import Scene
 
@@ -158,11 +159,9 @@ def _load(path: Path, grid: Grid) -> np.ndarray | None:
 
 
 def _save(path: Path, arr: np.ndarray) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    with open(tmp, "wb") as f:
-        np.save(f, arr)
-    os.replace(tmp, path)
+    buf = io.BytesIO()
+    np.save(buf, arr)
+    write_atomic(path, buf.getvalue())
 
 
 def read_date_stack(
