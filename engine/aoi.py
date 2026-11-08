@@ -167,8 +167,32 @@ def _country(result: dict) -> str:
     return c or result.get("display_name", "").rsplit(",", 1)[-1].strip()
 
 
+def _is_postcode(result: dict) -> bool:
+    return "postcode" in (result.get("addresstype"), result.get("type"))
+
+
+def _inside_bbox(result: dict, other: dict) -> bool:
+    try:
+        s, n, w, e = (float(v) for v in other["boundingbox"])
+        lat, lon = float(result["lat"]), float(result["lon"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return s <= lat <= n and (w <= lon <= e if w <= e else lon >= w or lon <= e)
+
+
+def _distinct_places(results: list[dict]) -> list[dict]:
+    """Drop postcode rows when anything else matched, then rows that are the top place again
+    (Nominatim often returns a town both as its boundary and as a point inside it)."""
+    if any(not _is_postcode(r) for r in results):
+        results = [r for r in results if not _is_postcode(r)]
+    if not results:
+        return results
+    top = results[0]
+    return [top] + [r for r in results[1:] if not _inside_bbox(r, top)]
+
+
 def geocode(query: str, cache_dir: Path, *, fetch=get_json, sleep=time.sleep) -> AOI:
-    results = _fetch_results(query, cache_dir, fetch, sleep)
+    results = _distinct_places(_fetch_results(query, cache_dir, fetch, sleep))
     if not results:
         raise PlaceNotFound(f"No place found for '{query}'. Try a more specific name or pass lat/lon.")
     top = results[0]

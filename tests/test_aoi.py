@@ -20,9 +20,10 @@ from engine.errors import (
 UA = "overhead-hermes-plugin/0.1.0 (+https://github.com/leoresendedop-sys/overhead)"
 
 
-def _result(name, importance, lat=10.0, lon=20.0, country="Testland"):
+def _result(name, importance, lat=10.0, lon=20.0, country="Testland", **extra):
     d = 0.05
     return {
+        **extra,
         "display_name": f"{name}, {country}",
         "name": name,
         "lat": str(lat),
@@ -85,7 +86,10 @@ def test_geocode_picks_dominant(tmp_cache):
 
 
 def test_geocode_ambiguous_returns_candidates(tmp_cache):
-    fetch = lambda url, params, headers, timeout=30: [_result("A", 0.61), _result("B", 0.60)]
+    fetch = lambda url, params, headers, timeout=30: [
+        _result("Springfield", 0.61, 39.8, -89.6, "Illinois"),
+        _result("Springfield", 0.60, 37.2, -93.3, "Missouri"),
+    ]
     with pytest.raises(AmbiguousPlace) as ei:
         geocode("Springfield", tmp_cache, fetch=fetch, sleep=lambda s: None)
     cands = ei.value.extra["candidates"]
@@ -93,6 +97,33 @@ def test_geocode_ambiguous_returns_candidates(tmp_cache):
     for c in cands:
         assert set(c) == {"name", "country", "lat", "lon", "area_km2"}
     assert to_error_dict(ei.value)["error"]["type"] == "ambiguous_place"
+
+
+def _geocode(results, tmp_cache):
+    return geocode("q", tmp_cache, fetch=lambda *a, **k: results, sleep=lambda s: None)
+
+
+def test_geocode_drops_postcode_results(tmp_cache):
+    a = _geocode([_result("91001", 0.61, 40.0, -90.0, addresstype="postcode", type="postcode"),
+                  _result("Altadena", 0.60, addresstype="town")], tmp_cache)
+    assert a.name.startswith("Altadena")
+
+
+def test_geocode_keeps_a_postcode_when_nothing_else_matched(tmp_cache):
+    a = _geocode([_result("91001", 0.5, type="postcode")], tmp_cache)
+    assert a.name.startswith("91001")
+
+
+def test_geocode_collapses_the_same_place(tmp_cache):
+    # Nominatim's real answer for "Altadena, California": the CDP polygon, the same town as a
+    # point (91001), and a San Diego neighbourhood. Equal importance for the first two.
+    a = _geocode([_result("Altadena, Los Angeles County", 0.5186, 34.1928, -118.1375,
+                          addresstype="census"),
+                  _result("Altadena, Los Angeles County, 91001", 0.5186, 34.1899, -118.1317,
+                          addresstype="town"),
+                  _result("Altadena, North Park, San Diego", 0.1334, 32.7393, -117.1226,
+                          addresstype="quarter")], tmp_cache)
+    assert a.name == "Altadena, Los Angeles County, Testland"
 
 
 def test_geocode_not_found(tmp_cache):

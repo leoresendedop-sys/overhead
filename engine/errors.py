@@ -33,6 +33,10 @@ class NoClearScene(OverheadError):
 class NetworkError(OverheadError):
     type = "network"
 
+    def __init__(self, message: str, *, transient: bool = False, **extra):
+        super().__init__(message, **extra)
+        self.transient = transient  # timeout, connection failure or HTTP 5xx: worth a retry
+
 
 def to_error_dict(e: OverheadError) -> dict:
     return {"error": {"type": e.type, "message": e.message, **e.extra}}

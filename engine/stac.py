@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 from .aoi import AOI, USER_AGENT
 from .fsutil import write_atomic
-from .http import post_json
+from .http import post_json, retry_transient
 
 STAC_URL = "https://earth-search.aws.element84.com/v1"
 COLLECTION = "sentinel-2-l2a"
 BAND_KEYS = ("blue", "green", "red", "nir", "swir16", "swir22", "scl")
 PAGE_LIMIT = 100
+SEARCH_TIMEOUT = 20  # seconds per attempt; transient failures are retried twice
 
 
 @dataclass(frozen=True)
@@ -63,13 +65,13 @@ def _parse(feature: dict) -> Scene | None:
     )
 
 
-def _fetch_features(request: dict, max_items: int, post) -> list[dict]:
+def _fetch_features(request: dict, max_items: int, post, sleep) -> list[dict]:
     url = STAC_URL + "/search"
     headers = {"User-Agent": USER_AGENT}
     features: list[dict] = []
     body = request
     while True:
-        page = post(url, body, headers)
+        page = retry_transient(lambda: post(url, body, headers, timeout=SEARCH_TIMEOUT), sleep=sleep)
         features.extend(page.get("features", []))
         if len(features) >= max_items:
             break
@@ -89,6 +91,7 @@ def search_scenes(
     max_cloud: float = 80,
     max_items: int = 200,
     post=post_json,
+    sleep=time.sleep,
     today: date | None = None,
 ) -> list[Scene]:
     request = {
@@ -109,7 +112,7 @@ def search_scenes(
         except (OSError, ValueError):
             features = None
     if features is None:
-        features = _fetch_features(request, max_items, post)
+        features = _fetch_features(request, max_items, post, sleep)
         if cacheable:
             write_atomic(path, json.dumps(features).encode("utf-8"))
 

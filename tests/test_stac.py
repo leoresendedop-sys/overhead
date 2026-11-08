@@ -3,7 +3,10 @@ import json
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from engine.aoi import USER_AGENT, aoi_from_point
+from engine.errors import NetworkError
 from engine.stac import STAC_URL, group_by_date, search_scenes
 
 FIX = Path(__file__).parent / "fixtures"
@@ -127,3 +130,43 @@ def test_corrupt_cache_is_a_miss(tmp_cache):
         f.write_text("{not json")
     post2 = FakePost()
     assert len(_search(post2, tmp_cache)) == 4
+
+
+class FlakyPost(FakePost):
+    """Raises the given errors on the first calls, then answers like FakePost."""
+
+    def __init__(self, errors):
+        super().__init__([_pages()[0] | {"links": []}])
+        self.errors = list(errors)
+        self.timeouts = []
+
+    def __call__(self, url, body, headers, timeout=60):
+        self.timeouts.append(timeout)
+        if self.errors:
+            raise self.errors.pop(0)
+        return super().__call__(url, body, headers, timeout)
+
+
+def _transient(msg="timed out"):
+    return NetworkError(msg, transient=True)
+
+
+def test_search_retries_transient_errors_with_backoff(tmp_cache):
+    post, sleeps = FlakyPost([_transient(), _transient("HTTP 503")]), []
+    scenes = _search(post, tmp_cache, sleep=sleeps.append)
+    assert len(scenes) == 3 and sleeps == [1, 2]  # page 1 of the fixture
+    assert post.timeouts == [20, 20, 20]
+
+
+def test_search_gives_up_after_two_retries(tmp_cache):
+    post, sleeps = FlakyPost([_transient(), _transient(), _transient("third")]), []
+    with pytest.raises(NetworkError) as e:
+        _search(post, tmp_cache, sleep=sleeps.append)
+    assert e.value.message == "third" and sleeps == [1, 2] and len(post.timeouts) == 3
+
+
+def test_search_does_not_retry_client_errors(tmp_cache):
+    post, sleeps = FlakyPost([NetworkError("HTTP 400")]), []
+    with pytest.raises(NetworkError):
+        _search(post, tmp_cache, sleep=sleeps.append)
+    assert sleeps == [] and len(post.timeouts) == 1
