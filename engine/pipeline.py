@@ -480,8 +480,8 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
 
     def search_period(p):  # one search per period: a single capped search loses the oldest ones
         first_day, last_day = _period_bounds(p, step)
-        return search(aoi, max(first_day, start), min(last_day, last), cache_dir,
-                      max_items=MAX_PERIOD_ITEMS)
+        lo, hi = max(first_day, start), min(last_day, last)
+        return search(aoi, lo, hi, cache_dir, max_items=MAX_PERIOD_ITEMS) if lo <= hi else []
     with ThreadPoolExecutor(WORKERS) as pool:
         found = dict(zip(periods, pool.map(search_period, periods)))
     by_period: dict[str, dict[str, list[Scene]]] = {

@@ -625,3 +625,13 @@ def test_scenes_and_timelapse_take_a_single_day(tmp_cache, tmp_path):
     with pytest.raises(BadInput):
         run_timelapse(AOI, day, day - timedelta(days=1), "month", "ndvi", tmp_cache,
                       RunStore(tmp_path / "runs"), search=make_search([]), reader=make_reader({}))
+
+
+def test_timelapse_does_not_search_periods_after_today(tmp_cache, tmp_path):
+    first = TODAY.replace(day=1)
+    later = (first + timedelta(days=62)).replace(day=1)  # two months ahead
+    search = EarthSearch([scene(TODAY.isoformat())])
+    r = run_timelapse(AOI, first, later, "month", "ndvi", tmp_cache, RunStore(tmp_path / "runs"),
+                      search=search, reader=make_reader({}))
+    assert [(s, e) for s, e, _, _ in search.calls] == [(first, TODAY)]  # no inverted ranges
+    assert [s["value"] is None for s in r["series"]] == [False, True, True]
