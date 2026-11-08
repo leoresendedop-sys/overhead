@@ -287,3 +287,12 @@ def test_tools_report_a_missing_engine(plugin, storage, monkeypatch):
     err = error_of(ctx.handlers["overhead_locate"]({"place": "x"}))
     assert err["type"] == "internal" and "rasterio" in err["message"]
     assert "hermes gateway restart" in err["message"]  # a process started before the install
+
+
+def test_scenes_passes_on_the_search_notes(h, tmp_path, monkeypatch):
+    note = "The search matched 366 scenes; only the least cloudy 200 (by scene metadata) were ranked."
+    place = {"name": "x", "full_name": "x", "area_km2": 1.0}
+    monkeypatch.setattr(h, "run_scenes", lambda *a, **k: {"place": place, "dates": [], "notes": [note]})
+    out = json.loads(h.make_handlers(tmp_path)["overhead_scenes"](
+        {"place": "x", "start": "2024-01-01", "end": "2024-12-31"}))
+    assert out["notes"] == [note]

@@ -499,3 +499,96 @@ def test_compare_windows_far_apart_are_the_full_window(tmp_cache, tmp_path):
                 RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
     assert [(s, e) for s, e, _ in search.calls] == [
         (date(2024, 11, 15), date(2025, 1, 14)), (date(2025, 1, 16), date(2025, 3, 17))]
+
+
+# ---------------------------------------------------------------- search truncation (F3)
+
+from engine.stac import Scenes  # noqa: E402
+
+
+class EarthSearch:
+    """Fake STAC search that answers like Earth Search: the items in the range, newest first (or
+    least cloudy first with sortby="cloud"), at most max_items, plus how many matched."""
+    def __init__(self, scenes):
+        self.scenes, self.calls = scenes, []
+
+    def __call__(self, aoi, start, end, cache_dir, *, max_items=200, sortby=None, **kw):
+        self.calls.append((start, end, max_items, sortby))
+        hits = [s for s in self.scenes if start.isoformat() <= s.date <= end.isoformat()]
+        if sortby == "cloud":
+            hits.sort(key=lambda s: s.cloud_cover)
+        else:
+            hits.sort(key=lambda s: s.datetime, reverse=True)
+        out = Scenes(sorted(hits[:max_items], key=lambda s: s.datetime))
+        out.matched, out.returned = len(hits), min(len(hits), max_items)
+        return out
+
+
+def _every_other_day(first: date, last: date, tiles=("A", "B")):
+    d, out = first, []
+    while d <= last:
+        out += [scene(d.isoformat(), tile=t) for t in tiles]
+        d += timedelta(days=2)
+    return out
+
+
+def test_timelapse_early_years_survive_newest_first_truncation(tmp_cache, tmp_path):
+    # 8 years of scenes on two tiles is ~2,900 items. One search capped at 1,000 newest-first
+    # kept only 2023-2025, and the earlier years came out as "no clear image".
+    search = EarthSearch(_every_other_day(date(2018, 1, 1), date(2025, 12, 31)))
+    r = run_timelapse(AOI, date(2018, 1, 1), date(2025, 12, 31), "year", "ndvi", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
+    assert [s["period"] for s in r["series"]] == [str(y) for y in range(2018, 2026)]
+    assert all(s["value"] is not None for s in r["series"])
+    assert len(search.calls) == 8 and all(c[2] <= 200 for c in search.calls)
+    note = next(n for n in r["notes"] if "matched more" in n)
+    assert "8 of 8 periods" in note and "newest 200" in note
+
+
+def test_timelapse_searches_each_period_within_the_range(tmp_cache, tmp_path):
+    search = EarthSearch([scene("2024-06-14"), scene("2024-07-12"), scene("2024-08-09")])
+    r = run_timelapse(AOI, date(2024, 6, 10), date(2024, 8, 20), "month", "ndvi", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
+    assert sorted((s, e) for s, e, _, _ in search.calls) == [
+        (date(2024, 6, 10), date(2024, 6, 30)), (date(2024, 7, 1), date(2024, 7, 31)),
+        (date(2024, 8, 1), date(2024, 8, 20))]
+    assert not any("matched more" in n for n in r["notes"])
+
+
+def test_timelapse_quarter_periods_are_searched_whole(tmp_cache, tmp_path):
+    search = EarthSearch([scene("2024-02-14"), scene("2024-05-12")])
+    run_timelapse(AOI, date(2024, 1, 1), date(2024, 6, 30), "quarter", "ndvi", tmp_cache,
+                  RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
+    assert sorted((s, e) for s, e, _, _ in search.calls) == [
+        (date(2024, 1, 1), date(2024, 3, 31)), (date(2024, 4, 1), date(2024, 6, 30))]
+
+
+def test_compare_side_searches_take_up_to_500_items_and_say_when_cut(tmp_cache, tmp_path):
+    many = _every_other_day(date(2024, 11, 15), date(2025, 1, 14), tiles="ABCDEFGHIJKLMNOPQ") \
+        + [scene("2025-02-14")]
+    search = EarthSearch(many)
+    r = run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "auto", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
+    side_calls = [c for c in search.calls if c[3] is None]
+    assert len(side_calls) == 2 and all(c[2] == 500 for c in side_calls)
+    note = next(n for n in r["notes"] if "matched" in n)
+    assert note.startswith("Before:") and "527 scenes" in note and "newest 500" in note
+
+
+def test_scenes_ranks_the_least_cloudy_and_says_when_cut(tmp_cache):
+    search = EarthSearch(_every_other_day(date(2024, 1, 1), date(2024, 12, 31)))
+    r = run_scenes(AOI, date(2024, 1, 1), date(2024, 12, 31), tmp_cache, search=search,
+                   reader=make_reader({}))
+    assert search.calls[0][3] == "cloud"
+    assert any("366 scenes" in n and "least cloudy 200" in n for n in r["notes"])
+    small = run_scenes(AOI, date(2024, 12, 1), date(2024, 12, 31), tmp_cache,
+                       search=make_search([scene("2024-12-10")]), reader=make_reader({}))
+    assert small["notes"] == []
+
+
+def test_suggestions_search_the_least_cloudy_first(tmp_cache, tmp_path):
+    search = EarthSearch([scene("2024-12-14"), scene("2025-02-14")])
+    with pytest.raises(NoClearScene):
+        run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "auto", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=search, reader=make_reader({"2024-12-14": 0.2}))
+    assert [c[3] for c in search.calls if c[3]] == ["cloud"]  # the +-90-day suggestion search

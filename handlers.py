@@ -123,7 +123,7 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 30:
             raise BadInput("max_results must be a whole number between 1 and 30.")
         r = run_scenes(_aoi(args, cache_dir), start, end, cache_dir, max_results=n)
-        return _json({"place": _place(r), "dates": r["dates"]})
+        return _json({"place": _place(r), "dates": r["dates"], "notes": r["notes"]})
 
     def compare(args: dict):
         before, after = _range(args, "before", "after",

@@ -45,7 +45,7 @@ from .report import (
     legend_for,
 )
 from .runs import RunStore
-from .stac import COLLECTION, STAC_URL, Scene, group_by_date, search_scenes
+from .stac import COLLECTION, STAC_URL, Scene, group_by_date, search_scenes, truncation
 
 FIRST_DATE = date(2017, 3, 28)  # Sentinel-2 L2A global coverage starts around here
 FOCUSES = ("auto", "vegetation", "burn", "water")
@@ -54,6 +54,8 @@ SUGGEST_CLEAR = 0.60
 STOP_CLEAR = 0.95
 MIN_CLEAR_TIMELAPSE = 0.60
 MAX_FRAMES = 24
+MAX_SIDE_ITEMS = 500  # STAC items per compare side window (Earth Search returns the newest first)
+MAX_PERIOD_ITEMS = 200  # STAC items per timelapse period
 WORKERS = 6  # orchestration threads; HTTP reads are bounded by the shared pool in raster
 ALL_BANDS = ["blue", "green", "red", "nir", "swir16", "swir22", "scl"]
 METRICS = {
@@ -186,7 +188,8 @@ def run_scenes(aoi: AOI, start: date, end: date, cache_dir: Path, *, max_results
     if end <= start:
         raise BadInput("end must be after start.")
     area = _Area(aoi)
-    groups = group_by_date(search(aoi, start, end, cache_dir))
+    found = search(aoi, start, end, cache_dir, sortby="cloud")
+    groups = group_by_date(found)
     dates = _lowest_cloud(groups, 3 * max_results)
     with ThreadPoolExecutor(WORKERS) as pool:
         clear = _clear_by_date(area, groups, dates, reader, cache_dir, pool)
@@ -195,6 +198,8 @@ def run_scenes(aoi: AOI, start: date, end: date, cache_dir: Path, *, max_results
         "place": _place(aoi),
         "dates": [{"date": d, "aoi_clear_fraction": round(clear[d][0], 2), "tiles": len(groups[d])}
                   for d in ranked],
+        "notes": [f"The search matched {cut[1]} scenes; only the least cloudy {cut[0]} (by scene "
+                  "metadata) were ranked." for cut in [truncation(found)] if cut],
     }
 
 
@@ -202,7 +207,8 @@ def run_scenes(aoi: AOI, start: date, end: date, cache_dir: Path, *, max_results
 
 def _suggest(area: _Area, target: date, cache_dir, search, reader, pool) -> list[dict]:
     end = min(target + timedelta(days=90), date.today())
-    groups = group_by_date(search(area.aoi, target - timedelta(days=90), end, cache_dir))
+    groups = group_by_date(search(area.aoi, target - timedelta(days=90), end, cache_dir,
+                                  sortby="cloud"))
     dates = _lowest_cloud(groups, 8)
     clear = {d: v[0] for d, v in _clear_by_date(area, groups, dates, reader, cache_dir, pool).items()}
     ranked = sorted((d for d in dates if clear[d] > 0), key=lambda d: (-clear[d], d))
@@ -234,7 +240,10 @@ def _side_windows(before: date, after: date, window_days: int) -> dict[str, tupl
 def _rank_side(area: _Area, target: date, side: str, window: tuple[date, date], cache_dir, search,
                reader, pool) -> dict:
     """Search one side's window and rank it with coarse SCL only; decides single scene vs composite."""
-    scenes = search(area.aoi, window[0], window[1], cache_dir)
+    scenes = search(area.aoi, window[0], window[1], cache_dir, max_items=MAX_SIDE_ITEMS)
+    cut = truncation(scenes)
+    note = (f"{side.capitalize()}: the search from {window[0].isoformat()} to {window[1].isoformat()} "
+            f"matched {cut[1]} scenes; only the newest {cut[0]} were considered." if cut else None)
     groups = group_by_date(scenes)
     if not groups:
         _fail(area, target, side, cache_dir, search, reader, pool)
@@ -257,7 +266,7 @@ def _rank_side(area: _Area, target: date, side: str, window: tuple[date, date], 
     if est < MIN_CLEAR:  # fail before any full-resolution read
         _fail(area, target, side, cache_dir, search, reader, pool)
     return {"side": side, "target": target, "best": best, "use": use, "groups": groups,
-            "coarse": clear[best][0]}
+            "coarse": clear[best][0], "search_note": note}
 
 
 def _load_side(area: _Area, plan: dict, stacks: dict) -> dict:
@@ -318,6 +327,7 @@ def run_compare(aoi: AOI, before: date, after: date, focus: str, window_days: in
     headline = compare_headline(stats, focus, d1, d2)
     side_notes = [s["_note"] for s in sides.values() if s["_note"]]
     notes = compare_notes(area.res, stats, side_notes)
+    notes += [p["search_note"] for p in plans if p["search_note"]]
     for s in sides.values():
         if is_glinted(s["_stack"], area.mask):
             notes.append(f"Sun glint or smoke haze over water on {s['date']}: "
@@ -368,6 +378,19 @@ def _periods(start: date, end: date, step: str) -> list[str]:
         if m > 12:
             y, m = y + 1, 1
     return list(dict.fromkeys(out))
+
+
+def _period_bounds(period: str, step: str) -> tuple[date, date]:
+    """First and last day of a period ("2024-06", "2024-Q2" or "2024")."""
+    y = int(period[:4])
+    if step == "month":
+        first = last = int(period[5:7])
+    elif step == "quarter":
+        first = 3 * (int(period[-1]) - 1) + 1
+        last = first + 2
+    else:
+        first, last = 1, 12
+    return date(y, first, 1), date(y, last, calendar.monthrange(y, last)[1])
 
 
 def _period_of(iso: str, step: str) -> str:
@@ -450,11 +473,18 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
         raise BadInput(f"That range gives {len(periods)} frames; the limit is {MAX_FRAMES}. "
                        "Use a larger step or a shorter range.")
     area = _Area(aoi)
-    scenes = search(aoi, start, min(end, date.today()), cache_dir, max_items=1000)
-    groups = group_by_date(scenes)
-    by_period: dict[str, dict[str, list[Scene]]] = {p: {} for p in periods}
-    for d, g in groups.items():
-        by_period[_period_of(d, step)][d] = g
+    last = min(end, date.today())
+
+    def search_period(p):  # one search per period: a single capped search loses the oldest ones
+        first_day, last_day = _period_bounds(p, step)
+        return search(aoi, max(first_day, start), min(last_day, last), cache_dir,
+                      max_items=MAX_PERIOD_ITEMS)
+    with ThreadPoolExecutor(WORKERS) as pool:
+        found = dict(zip(periods, pool.map(search_period, periods)))
+    by_period: dict[str, dict[str, list[Scene]]] = {
+        p: {d: g for d, g in group_by_date(found[p]).items() if _period_of(d, step) == p}
+        for p in periods}
+    cut = [p for p in periods if truncation(found[p])]
     extra, metric_label = METRICS[metric]
     bands = ["red", "green", "blue", "scl", *extra]
 
@@ -517,6 +547,10 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
     if glinted:
         notes.append(f"Sun glint or smoke haze over water on {', '.join(glinted)}: "
                      "water area there is likely underestimated.")
+    if cut:
+        notes.append(f"Searches for {len(cut)} of {len(periods)} periods matched more than "
+                     f"{MAX_PERIOD_ITEMS} scenes; only the newest {MAX_PERIOD_ITEMS} of each were "
+                     f"considered ({', '.join(cut)}).")
     result = {
         "run_id": run_id, "kind": "timelapse", "place": _place(aoi), "resolution_m": area.res,
         "metric": metric, "series": series, "headline": headline,

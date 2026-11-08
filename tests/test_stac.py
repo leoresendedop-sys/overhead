@@ -7,7 +7,7 @@ import pytest
 
 from engine.aoi import USER_AGENT, aoi_from_geojson, aoi_from_point
 from engine.errors import NetworkError
-from engine.stac import STAC_URL, group_by_date, search_scenes
+from engine.stac import STAC_URL, group_by_date, search_scenes, truncation
 
 FIX = Path(__file__).parent / "fixtures"
 BANDS = {"blue", "green", "red", "nir", "swir16", "swir22", "scl"}
@@ -182,3 +182,50 @@ def test_search_does_not_retry_client_errors(tmp_cache):
     with pytest.raises(NetworkError):
         _search(post, tmp_cache, sleep=sleeps.append)
     assert sleeps == [] and len(post.timeouts) == 1
+
+
+# ---------------------------------------------------------------- sort order and truncation (F3)
+
+def _with_matched(matched, key="context"):
+    pages = _pages()
+    for p in pages:
+        if key == "context":
+            p["context"] = {"limit": 100, "matched": matched, "returned": len(p["features"])}
+        else:
+            p["numberMatched"] = matched
+    return FakePost(pages)
+
+
+def test_sortby_cloud_asks_for_the_least_cloudy_first(tmp_cache):
+    post = FakePost()
+    _search(post, tmp_cache, sortby="cloud")
+    assert post.calls[0][1]["sortby"] == [{"field": "properties.eo:cloud_cover", "direction": "asc"}]
+    plain = FakePost()
+    _search(plain, tmp_cache, (date(2025, 3, 1), date(2025, 3, 9)))
+    assert "sortby" not in plain.calls[0][1]  # Earth Search's own order: newest first
+
+
+def test_sortby_is_part_of_the_cache_key(tmp_cache):
+    post = _single_page()
+    _search(post, tmp_cache)
+    _search(post, tmp_cache, sortby="cloud")
+    assert len(post.calls) == 2
+
+
+@pytest.mark.parametrize("key", ["context", "numberMatched"])
+def test_search_reports_more_matches_than_it_returned(tmp_cache, key):
+    scenes = _search(_with_matched(3118, key), tmp_cache, max_items=3)
+    assert len(scenes) == 3 and scenes.matched == 3118 and truncation(scenes) == (3, 3118)
+
+
+def test_search_not_truncated_when_everything_came_back(tmp_cache):
+    scenes = _search(_with_matched(4), tmp_cache)
+    assert scenes.matched == 4 and truncation(scenes) is None
+    assert truncation(_search(FakePost(), tmp_cache, (date(2025, 3, 1), date(2025, 3, 9)))) is None
+    assert truncation([]) is None  # a plain list (a test fake) is never truncated
+
+
+def test_matched_count_survives_the_cache(tmp_cache):
+    first = _search(_with_matched(3118), tmp_cache, max_items=3)
+    again = _search(FakePost(), tmp_cache, max_items=3)  # served from the cache
+    assert again == first and again.matched == 3118
