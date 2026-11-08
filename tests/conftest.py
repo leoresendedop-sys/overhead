@@ -11,25 +11,27 @@ if str(ROOT) not in sys.path:
 PACKAGE = "overhead_plugin"
 
 
-def load_plugin():
+def load_plugin(name=PACKAGE):
     """Import the repo root as a package, the way Hermes loads a directory plugin."""
-    if PACKAGE in sys.modules:
-        return sys.modules[PACKAGE]
+    if name in sys.modules:
+        return sys.modules[name]
     spec = importlib.util.spec_from_file_location(
-        PACKAGE, ROOT / "__init__.py", submodule_search_locations=[str(ROOT)])
+        name, ROOT / "__init__.py", submodule_search_locations=[str(ROOT)])
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[PACKAGE] = mod
+    sys.modules[name] = mod
     try:
         spec.loader.exec_module(mod)
     except BaseException:
-        sys.modules.pop(PACKAGE, None)
+        sys.modules.pop(name, None)
         raise
     return mod
 
 
 @pytest.fixture
 def plugin():
-    return load_plugin()
+    mod = load_plugin()
+    importlib.import_module(f"{PACKAGE}.handlers")  # the package itself loads it lazily
+    return mod
 
 
 @pytest.fixture

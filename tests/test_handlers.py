@@ -140,30 +140,58 @@ def test_want_images_is_false_without_hermes(plugin, monkeypatch):
     assert plugin.handlers.want_images() is False
 
 
-def test_register_survives_a_failing_registration(plugin, tmp_path, monkeypatch):
-    storage = types.ModuleType("plugins.plugin_storage")
-    storage.plugin_data_dir = lambda name: tmp_path / name
+class FakeCtx:
+    def __init__(self, failing_hook=None):
+        self.handlers, self.hooks, self.skills, self.failing_hook = {}, [], [], failing_hook
+
+    def register_tool(self, name, toolset, schema, handler, **kw):
+        assert toolset == "overhead" and schema["name"] == name and callable(handler)
+        self.handlers[name] = handler
+
+    def register_hook(self, name, fn, **kw):
+        if name == self.failing_hook:
+            raise ValueError("unknown hook")  # an older Hermes
+        self.hooks.append(name)
+
+    def register_skill(self, name, path, **kw):
+        assert Path(path).is_file() and kw.get("description")
+        self.skills.append(name)
+
+
+@pytest.fixture
+def storage(tmp_path, monkeypatch):
+    mod = types.ModuleType("plugins.plugin_storage")
+    mod.plugin_data_dir = lambda name: tmp_path / name
     monkeypatch.setitem(sys.modules, "plugins", types.ModuleType("plugins"))
-    monkeypatch.setitem(sys.modules, "plugins.plugin_storage", storage)
+    monkeypatch.setitem(sys.modules, "plugins.plugin_storage", mod)
 
-    class Ctx:
-        def __init__(self):
-            self.tools, self.hooks, self.skills = [], [], []
 
-        def register_tool(self, name, toolset, schema, handler, **kw):
-            assert toolset == "overhead" and schema["name"] == name and callable(handler)
-            self.tools.append(name)
-
-        def register_hook(self, name, fn, **kw):
-            if name == "transform_llm_output":
-                raise ValueError("unknown hook")  # an older Hermes
-            self.hooks.append(name)
-
-        def register_skill(self, name, path, **kw):
-            assert Path(path).is_file() and kw.get("description")
-            self.skills.append(name)
-
-    ctx = Ctx()
+def test_register_survives_a_failing_registration(plugin, storage):
+    ctx = FakeCtx(failing_hook="transform_llm_output")
     plugin.register(ctx)
-    assert ctx.tools == ["overhead_locate", "overhead_scenes", "overhead_compare", "overhead_timelapse"]
+    assert list(ctx.handlers) == ["overhead_locate", "overhead_scenes", "overhead_compare",
+                                  "overhead_timelapse"]
     assert ctx.hooks == ["post_tool_call"] and ctx.skills == ["earth-watch"]
+
+
+def test_register_does_not_import_the_engine(storage):
+    from conftest import load_plugin
+    name = "overhead_lazy_probe"
+    try:
+        ctx = FakeCtx()
+        load_plugin(name).register(ctx)  # Hermes gives import + register() 10 s
+        assert f"{name}.handlers" not in sys.modules and f"{name}.engine" not in sys.modules
+        out = ctx.handlers["overhead_compare"]({"place": "x", "before": "2019", "after": "2025-01"})
+        assert json.loads(out)["error"]["type"] == "bad_input"
+        assert f"{name}.handlers" in sys.modules
+    finally:
+        for key in [k for k in sys.modules if k == name or k.startswith(name + ".")]:
+            del sys.modules[key]
+
+
+def test_tools_report_a_missing_engine(plugin, storage, monkeypatch):
+    monkeypatch.setitem(sys.modules, "overhead_plugin.handlers", None)  # import fails
+    ctx = FakeCtx()
+    plugin.register(ctx)
+    err = error_of(ctx.handlers["overhead_locate"]({"place": "x"}))
+    assert err["type"] == "internal" and "rasterio" in err["message"]
