@@ -98,8 +98,9 @@ def _fetch_features(request: dict, max_items: int, post, sleep) -> tuple[list[di
         page = retry_transient(lambda: post(url, body, headers, timeout=SEARCH_TIMEOUT), sleep=sleep)
         if matched is None:
             matched = _matched(page)
-        features.extend(page.get("features", []))
-        if len(features) >= max_items:
+        page_features = page.get("features") or []
+        features.extend(page_features)
+        if not page_features or len(features) >= max_items:  # an empty page ends the paging
             break
         nxt = next((l for l in page.get("links", []) if l.get("rel") == "next"), None)
         if not nxt or not nxt.get("body"):
@@ -113,7 +114,8 @@ def _read_cache(path: Path) -> tuple[list[dict], int | None] | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or not isinstance(data.get("features"), list):
+    if not isinstance(data, dict) or not isinstance(data.get("features"), list) \
+            or not all(isinstance(f, dict) for f in data["features"]):
         return None
     matched = data.get("matched")
     return data["features"], matched if isinstance(matched, int) else None

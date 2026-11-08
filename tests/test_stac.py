@@ -229,3 +229,29 @@ def test_matched_count_survives_the_cache(tmp_cache):
     first = _search(_with_matched(3118), tmp_cache, max_items=3)
     again = _search(FakePost(), tmp_cache, max_items=3)  # served from the cache
     assert again == first and again.matched == 3118
+
+
+# ---------------------------------------------------------------- hardening (A9)
+
+class EndlessPost(FakePost):
+    """A server that keeps sending a next link with empty pages."""
+    def __call__(self, url, body, headers, timeout=60):
+        self.calls.append(body)
+        if len(self.calls) > 5:
+            raise AssertionError("still paging through empty pages")
+        return {"type": "FeatureCollection", "features": [],
+                "links": [{"rel": "next", "body": {"next": f"t{len(self.calls)}"}}]}
+
+
+def test_empty_page_stops_paging(tmp_cache):
+    post = EndlessPost()
+    assert _search(post, tmp_cache) == [] and len(post.calls) == 1
+
+
+@pytest.mark.parametrize("junk", ["[1, 2]", '{"features": "x"}', '{"features": [1, "a"]}', '"text"'])
+def test_cache_of_the_wrong_shape_is_a_miss(tmp_cache, junk):
+    _search(FakePost(), tmp_cache)
+    for f in (tmp_cache / "stac").iterdir():
+        f.write_text(junk)
+    post = FakePost()
+    assert len(_search(post, tmp_cache)) == 4 and len(post.calls) == 2

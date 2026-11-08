@@ -150,3 +150,39 @@ def test_gdal_options_ask_for_header_bytes_and_retries():
 def test_gdal_options_never_read_netrc():
     """libcurl must not pick up credentials from ~/.netrc for the public COG reads."""
     assert raster.GDAL_OPTIONS["GDAL_HTTP_NETRC"] == "NO"
+
+
+# ---------------------------------------------------------------- read errors (A3)
+
+import pytest  # noqa: E402
+
+from engine.errors import NetworkError  # noqa: E402
+
+
+@pytest.mark.parametrize("error", ["io", "warp", "http"])
+def test_cog_read_errors_are_network_errors(monkeypatch, error):
+    from rasterio._err import CPLE_HttpResponseError
+    from rasterio.errors import RasterioIOError, WarpOperationError
+    exc = {"io": RasterioIOError("'/vsicurl/https://x/B04.tif' not recognized: HTTP 503"),
+           "warp": WarpOperationError("Chunk and warp failed"),
+           "http": CPLE_HttpResponseError(1, 11, "HTTP response code: 500")}[error]
+
+    def boom(*a, **k):
+        raise exc
+    monkeypatch.setattr(raster.rasterio, "open", boom)
+    g = Grid(32611, (10.0, 0.0, 0.0, 0.0, -10.0, 40.0), 4, 4, 10)
+    with pytest.raises(NetworkError) as e:
+        read_band("https://sentinel-cogs.s3.us-west-2.amazonaws.com/x/B04.tif", g)
+    assert e.value.type == "network" and e.value.transient
+    assert "try again in a minute" in e.value.message and "B04.tif" in e.value.message
+
+
+def test_cog_read_error_surfaces_from_the_read_pool(tmp_cache, monkeypatch):
+    from rasterio.errors import RasterioIOError
+
+    def boom(*a, **k):
+        raise RasterioIOError("Read or write failed. IReadBlock failed at X offset 0")
+    monkeypatch.setattr(raster.rasterio, "open", boom)
+    g = Grid(32611, (10.0, 0.0, 0.0, 0.0, -10.0, 40.0), 4, 4, 10)
+    with pytest.raises(NetworkError):
+        read_date_stack([_scene("A")], g, ["red"], tmp_cache)

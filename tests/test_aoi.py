@@ -248,3 +248,74 @@ def test_resolve_precedence_and_bad_input(tmp_cache):
     assert a.source == "point"
     poly = {"type": "Polygon", "coordinates": [[[0, 0], [0.1, 0], [0.1, 0.1], [0, 0.1], [0, 0]]]}
     assert resolve_aoi({"geojson": poly, "lat": 1, "lon": 2}, tmp_cache).source == "geojson"
+
+
+# ---------------------------------------------------------------- Nominatim limiter (A2), cache (A9)
+
+def _threads(n, target):
+    import threading
+    barrier = threading.Barrier(n)
+
+    def run(i):
+        barrier.wait()  # all threads ask at once
+        target(i)
+    threads = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+
+
+class _SlowFetch:
+    """Fake Nominatim that takes 50 ms per request and records how many ran at once."""
+    def __init__(self):
+        import threading
+        self.lock, self.active, self.peak, self.calls = threading.Lock(), 0, 0, []
+
+    def __call__(self, url, params, headers, timeout=30):
+        import time as _time
+        with self.lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            self.calls.append(params["q"])
+        _time.sleep(0.05)
+        with self.lock:
+            self.active -= 1
+        return [_result(params["q"], 0.8)]
+
+
+def test_geocode_rate_limit_holds_across_threads(tmp_cache):
+    fetch, sleeps = _SlowFetch(), []
+    _threads(3, lambda i: geocode(f"Place {i}", tmp_cache, fetch=fetch, sleep=sleeps.append))
+    assert len(fetch.calls) == 3 and fetch.peak == 1  # one request at a time
+    assert len(sleeps) == 2 and all(0.5 < s <= 1.0 for s in sleeps)  # each waits out the second
+
+
+def test_geocode_same_place_from_two_threads_is_one_request(tmp_cache):
+    fetch = _SlowFetch()
+    _threads(2, lambda i: geocode("Same place", tmp_cache, fetch=fetch, sleep=lambda s: None))
+    assert fetch.calls == ["Same place"]
+
+
+@pytest.mark.parametrize("junk", ['{"not": "a list"}', "[1, 2]", '"text"', "{not json"])
+def test_geocode_cache_of_the_wrong_shape_is_a_miss(tmp_cache, junk):
+    calls = []
+
+    def fetch(url, params, headers, timeout=30):
+        calls.append(1)
+        return [_result("A", 0.8)]
+    geocode("Shape", tmp_cache, fetch=fetch, sleep=lambda s: None)
+    for f in (tmp_cache / "geocode").iterdir():
+        f.write_text(junk)
+    a = geocode("Shape", tmp_cache, fetch=fetch, sleep=lambda s: None)
+    assert len(calls) == 2 and a.name.startswith("A")
+
+
+def test_geocode_asks_for_english_names(tmp_cache):
+    seen = {}
+
+    def fetch(url, params, headers, timeout=30):
+        seen.update(params)
+        return [_result("A", 0.8)]
+    geocode("Manaus", tmp_cache, fetch=fetch, sleep=lambda s: None)
+    assert seen["accept-language"] == "en"

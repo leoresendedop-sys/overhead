@@ -137,3 +137,38 @@ def test_series_chart_marks_flagged_points(tmp_path):
     series_chart(pts, "Water (ha)", c, flags=[False] * 4)
     assert (_px(a) != _px(b)).any()
     assert (_px(a) == _px(c)).all()  # no flagged point: nothing changes, no legend entry
+
+
+# ---------------------------------------------------------------- GIF size (A4), tiny panes (A6)
+
+def test_gif_long_side_is_at_most_800_px(tmp_path):
+    frames = [Image.new("RGB", (1500, 1000), (i * 60, 10, 10)) for i in range(3)]
+    save_gif(frames, tmp_path / "big.gif")
+    g = Image.open(tmp_path / "big.gif")
+    assert g.size == (800, 533) and g.n_frames == 3
+    assert frames[0].size == (1500, 1000)  # the frames themselves (the card's) are untouched
+    tall = [Image.new("RGB", (400, 1000))] * 2
+    save_gif(tall, tmp_path / "tall.gif")
+    assert Image.open(tmp_path / "tall.gif").size == (320, 800)
+    small = [Image.new("RGB", (300, 200))] * 2
+    save_gif(small, tmp_path / "small.gif")
+    assert Image.open(tmp_path / "small.gif").size == (300, 200)
+
+
+def test_panel_upscales_a_tiny_grid_with_nearest_neighbour():
+    # A building-sized AOI is a 7 x 7 grid at 10 m: the panel used to be 105 px wide.
+    from engine.render import GAP, PAD
+    im = Image.new("RGB", (7, 7), (90, 120, 80))
+    im.putpixel((3, 3), (255, 0, 0))
+    p = panel(im, im, im, "Cathedral", ["≈ 1.2 ha burned"], [("#E5484D", "High severity")])
+    pane_w = (p.width - 2 * PAD - 2 * GAP) // 3
+    assert pane_w >= 360
+    block = (pane_w // 7) ** 2  # the red pixel, scaled up as a solid block in each pane
+    red = (np.asarray(p) == (255, 0, 0)).all(axis=2).sum()
+    assert red >= 3 * block * 0.95
+
+
+def test_panel_does_not_blow_up_a_tall_thin_grid():
+    im = Image.new("RGB", (5, 3000), (90, 120, 80))
+    p = panel(im, im, im, "Strip", [], [])
+    assert p.height < 3500

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 DATES = ("Dates are YYYY-MM-DD or YYYY-MM, from 2017-03-28 to today. A month is the whole month "
-         "as the start or end of a range, and its 15th as before or after.")
+         "as the start or end of a range, and its 15th as before or after (today, for the current "
+         "month). start and end may be the same day.")
 NUMBERS = "The numbers in the result are the only numbers to report; never estimate your own."
 STATS = ("Report `headline` and the stats exactly as given. Never add, subtract or recompute "
          "figures. `burn.low_ha` is low-severity change (often seasonal or urban noise) and is NOT "
@@ -24,9 +25,9 @@ PLACE = {
     "radius_km": {
         "type": "number",
         "default": 5,
-        "exclusiveMinimum": 0,
+        "minimum": 0.1,
         "maximum": 100,
-        "description": "Half the side of the square around lat/lon, in km (greater than 0, at most 100).",
+        "description": "Half the side of the square around lat/lon, in km (0.1 to 100).",
     },
     "geojson": {
         "description": "A GeoJSON Polygon, MultiPolygon, Feature or FeatureCollection (object or JSON "

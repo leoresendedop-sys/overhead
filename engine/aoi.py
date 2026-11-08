@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,8 @@ MAX_SIDE_PX = 2600  # 2,500 px a side plus a little for the UTM rotation of a la
 RESOLUTIONS = (10, 20, 40, 80)  # metres
 
 _last_request = 0.0  # wall-clock time of the last real Nominatim request
+_nominatim_lock = threading.Lock()  # held across the wait and the request: 1 request/s across threads
+LANGUAGE = "en"  # place names in English ("Brazil", not "Brasil")
 
 
 @dataclass(frozen=True)
@@ -150,28 +153,49 @@ def aoi_from_geojson(obj: dict | str, name: str | None = None) -> AOI:
     return _make(name or "Custom area", geom, "geojson")
 
 
+def _read_cached(path: Path) -> list[dict] | None:
+    """The cached answer, or None when it is missing, unreadable or not a list of results."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, list) or not all(isinstance(r, dict) for r in data):
+        return None
+    return data
+
+
 def _fetch_results(query, cache_dir, fetch, sleep):
     global _last_request
     cdir = Path(cache_dir) / "geocode"
     cdir.mkdir(parents=True, exist_ok=True)
-    path = cdir / (hashlib.sha1(query.strip().lower().encode("utf-8")).hexdigest() + ".json")
-    if path.exists():
-        return json.loads(path.read_text())
-    wait = 1.0 - (time.time() - _last_request)
-    if wait > 0:
-        sleep(wait)
-    params = {
-        "q": query,
-        "format": "jsonv2",
-        "polygon_geojson": 1,
-        "addressdetails": 1,
-        "limit": 5,
-    }
-    try:
-        results = fetch(NOMINATIM_URL, params, {"User-Agent": USER_AGENT}, timeout=30)
-    finally:
-        _last_request = time.time()
-    write_atomic(path, json.dumps(results).encode("utf-8"))
+    key = f"{LANGUAGE}|{query.strip().lower()}"
+    path = cdir / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
+    cached = _read_cached(path)
+    if cached is not None:
+        return cached
+    with _nominatim_lock:
+        cached = _read_cached(path)  # another thread may have fetched it while this one waited
+        if cached is not None:
+            return cached
+        wait = 1.0 - (time.time() - _last_request)
+        if wait > 0:
+            sleep(wait)
+        params = {
+            "q": query,
+            "format": "jsonv2",
+            "polygon_geojson": 1,
+            "addressdetails": 1,
+            "limit": 5,
+            "accept-language": LANGUAGE,
+        }
+        try:
+            results = fetch(NOMINATIM_URL, params, {"User-Agent": USER_AGENT}, timeout=30)
+        finally:
+            _last_request = time.time()
+        if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
+            raise PlaceNotFound(f"No place found for '{query}'. Try a more specific name or pass "
+                                "lat/lon.")
+        write_atomic(path, json.dumps(results).encode("utf-8"))  # inside the lock: see the re-check
     return results
 
 

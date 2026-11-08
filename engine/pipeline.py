@@ -71,8 +71,9 @@ ROLES = ("point", "start", "end")
 
 def parse_date(s: str, *, field: str, role: str = "point") -> date:
     """YYYY-MM-DD as given, or YYYY-MM. A month is its 15th for a point in time (compare's before
-    and after) and the whole month in a range: the 1st as its start, the last day as its end,
-    clamped to the dates Sentinel-2 L2A covers (2017-03-28 to today)."""
+    and after; today at most, for the current month) and the whole month in a range: the 1st as
+    its start, the last day as its end, clamped to the dates Sentinel-2 L2A covers (2017-03-28 to
+    today)."""
     if role not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     hint = f"{field} '{s}' is not usable: use YYYY-MM-DD or YYYY-MM, or call overhead_scenes."
@@ -83,6 +84,8 @@ def parse_date(s: str, *, field: str, role: str = "point") -> date:
     try:
         if day or role == "point":
             first = last = date(y, mo, int(day or 15))
+            if not day and first > date.today() >= date(y, mo, 1):  # the current month
+                first = last = date.today()
         else:
             first, last = date(y, mo, 1), date(y, mo, calendar.monthrange(y, mo)[1])
     except ValueError:
@@ -185,8 +188,8 @@ def _write_result(path: Path, result: dict) -> None:
 
 def run_scenes(aoi: AOI, start: date, end: date, cache_dir: Path, *, max_results: int = 12,
                search=search_scenes, reader=read_date_stack) -> dict:
-    if end <= start:
-        raise BadInput("end must be after start.")
+    if end < start:
+        raise BadInput("end must be on or after start.")
     area = _Area(aoi)
     found = search(aoi, start, end, cache_dir, sortby="cloud")
     groups = group_by_date(found)
@@ -462,8 +465,8 @@ def timelapse_headline(series: list[dict], metric: str, step: str, n_periods: in
 
 def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cache_dir: Path,
                   store: RunStore, *, search=search_scenes, reader=read_date_stack) -> dict:
-    if end <= start:
-        raise BadInput("end must be after start.")
+    if end < start:
+        raise BadInput("end must be on or after start.")
     if step not in ("month", "quarter", "year"):
         raise BadInput("step must be month, quarter or year.")
     if metric not in METRICS:

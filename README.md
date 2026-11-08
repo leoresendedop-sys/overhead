@@ -91,14 +91,16 @@ Every tool takes a place in one of three ways: `place` (a name, looked up on Ope
 Polygon, MultiPolygon, Feature or FeatureCollection). With coordinates or GeoJSON, `place` is only
 the title. Dates are `YYYY-MM-DD` or `YYYY-MM`, from 2017-03-28 to today. A month means the whole
 month as the `start` or `end` of a range (scenes, timelapse), and its 15th as a compare's `before` or
-`after`.
+`after` (today, for the current month). A range can be a single day. A compare searches each date's
+±`window_days`, cut at the midpoint between the two dates, so the before image is always older than
+the after image.
 
 | Tool | What it does | Key arguments | Returns |
 |---|---|---|---|
 | `overhead_locate` | Resolves a place to the exact area that will be analysed. Optional: a quick check before a slow run. | place fields | name, bbox, area in km², source, analysis resolution |
-| `overhead_scenes` | Lists the Sentinel-2 dates in a range, ranked by how cloud-free the area is. For vague dates ("last summer") or after a `no_clear_scene` error. | `start`, `end`, `max_results` (1–30, default 12) | dates with `aoi_clear_fraction` (0 to 1) |
-| `overhead_compare` | **The main tool.** What changed between two dates: vegetation, burn and water. | `before`, `after`, `focus` (`auto`, `vegetation`, `burn`, `water`), `window_days` (1–120, default 30) | `headline`; stats in ha (vegetation lost/gained/net, burn low/moderate/high/burned, water before/after/lost/gained/net); confidence; resolution; the image dates actually used; notes; the panel PNG and its layers; a `MEDIA:` line |
-| `overhead_timelapse` | How a place evolved: one frame per month, quarter or year (at most 24). | `start`, `end`, `step` (`month`, `quarter`, `year`), `metric` (`ndvi`, `water`, `burn`) | `headline`; a series per period (date, value, clear fraction, glint flag); the GIF and a chart PNG; notes; a `MEDIA:` line |
+| `overhead_scenes` | Lists the Sentinel-2 dates in a range, ranked by how cloud-free the area is. For vague dates ("last summer") or after a `no_clear_scene` error. | `start`, `end`, `max_results` (1–30, default 12) | dates with `aoi_clear_fraction` (0 to 1); notes |
+| `overhead_compare` | **The main tool.** What changed between two dates: vegetation, burn and water. | `before`, `after`, `focus` (`auto`, `vegetation`, `burn`, `water`), `window_days` (1–120, default 30) | `headline`; stats in ha (vegetation lost/gained/net, burn low/moderate/high/burned, water before/after/lost/gained/net); confidence; resolution; the image dates and scene ids actually used; the STAC items (`provenance`); notes; the panel PNG and its layers; a `MEDIA:` line |
+| `overhead_timelapse` | How a place evolved: one frame per month, quarter or year (at most 24). | `start`, `end`, `step` (`month`, `quarter`, `year`), `metric` (`ndvi`, `water`, `burn`) | `headline`; a series per period (date, value, clear fraction, glint flag); the STAC items (`provenance`); the GIF and a chart PNG; notes; a `MEDIA:` line |
 
 When the model can read images, compare and timelapse also attach small previews (before and
 after, or the first and last frames), so it can describe what it sees.
@@ -141,7 +143,8 @@ anything fails. The card is built from `src/` into `desktop/plugin.js` and impor
    with HTTP range requests, so only the pixels over the area are downloaded.
 3. **Clouds.** The scene classification layer (SCL) masks nodata, defective pixels, cloud shadow,
    cloud and cirrus. For each requested date Overhead checks the six image dates nearest to it
-   within ±`window_days` (dates over 30% cloudy in the scene metadata go last). It takes the
+   within ±`window_days`, cut at the midpoint between the two dates (dates over 30% cloudy in the
+   scene metadata go last). It takes the
    nearest one that is at least 95% clear over the area, or failing that the clearest of them. If
    that one is under 80% clear, it builds a per-pixel median composite of the three best.
 4. **Change.** Only pixels inside the area and clear on both dates count. Each class is a pixel
@@ -165,8 +168,9 @@ anything fails. The card is built from `src/` into `desktop/plugin.js` and impor
 
 **Numbers are computed, not guessed.** Each result carries a one-line `headline` and ready-made
 totals (`burn.burned_ha`, `vegetation.net_ha`, `water.net_ha`). The tool descriptions and the skill
-tell the model to report them as given and never to add, subtract or recompute them. Each run's
-`result.json` records the STAC items it used, and a compare's also records its thresholds.
+tell the model to report them as given and never to add, subtract or recompute them. Each result
+names the STAC items it used (`provenance`), and a compare's `result.json` also records its
+thresholds. A timelapse searches each period on its own, so a long range keeps its oldest years.
 
 References:
 
@@ -244,7 +248,7 @@ Place names and boundaries: © OpenStreetMap contributors, under the
 ## Development
 
 ```bash
-python -m pytest -q                                         # 178 offline unit tests
+python -m pytest -q                                         # 235 offline unit tests
 OVERHEAD_LIVE=1 python -m pytest tests/test_live.py -s      # the three demo scenes on live data
 npm ci && npm test && npm run typecheck && npm run build    # Desktop card: 31 tests, desktop/plugin.js
 hermes plugins validate .

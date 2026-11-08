@@ -58,11 +58,13 @@ def _date(args: dict, field: str, role: str = "point"):
 def _range(args: dict, first: str, last: str, message: str, *, months: str = "whole"):
     """Both dates of a range, checked before any place lookup (which is network I/O).
 
-    months="whole": a YYYY-MM start is its 1st and a YYYY-MM end its last day (scenes, timelapse).
-    months="mid": each YYYY-MM is its 15th (compare's before and after are points in time)."""
+    months="whole": a YYYY-MM start is its 1st and a YYYY-MM end its last day (scenes, timelapse);
+    a single day (start == end) is a valid range.
+    months="mid": each YYYY-MM is its 15th (compare's before and after are points in time, so they
+    must differ)."""
     roles = ("start", "end") if months == "whole" else ("point", "point")
     a, b = _date(args, first, roles[0]), _date(args, last, roles[1])
-    if b <= a:
+    if b < a or (b == a and months == "mid"):
         raise BadInput(message)
     return a, b
 
@@ -81,7 +83,7 @@ def _place(result: dict) -> dict:
 
 
 def _side(side: dict) -> dict:
-    return {k: side[k] for k in ("requested", "date", "clear_fraction", "composite")}
+    return {k: side[k] for k in ("requested", "date", "clear_fraction", "composite", "scenes")}
 
 
 def _deliverable(payload: dict, media: str, previews: list[str]) -> str | dict:
@@ -118,7 +120,7 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
                       "resolution_m": resolution_for(aoi)})
 
     def scenes(args: dict):
-        start, end = _range(args, "start", "end", "end must be after start.")
+        start, end = _range(args, "start", "end", "end must be on or after start.")
         n = _or(args, "max_results", 12)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 30:
             raise BadInput("max_results must be a whole number between 1 and 30.")
@@ -136,11 +138,12 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
             "stats": r["stats"], "confidence": r["confidence"], "valid_fraction": r["valid_fraction"],
             "resolution_m": r["resolution_m"], "before": _side(r["before"]),
             "after": _side(r["after"]), "notes": r["notes"], "files": r["files"],
+            "provenance": r["provenance"],
         }
         return _deliverable(payload, r["files"]["panel"], [r["files"]["before"], r["files"]["after"]])
 
     def timelapse(args: dict):
-        start, end = _range(args, "start", "end", "end must be after start.")
+        start, end = _range(args, "start", "end", "end must be on or after start.")
         aoi = _aoi(args, cache_dir)
         r = run_timelapse(aoi, start, end, _or(args, "step", "month"), _or(args, "metric", "ndvi"),
                           cache_dir, store)
@@ -149,6 +152,7 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
             "run_id": r["run_id"], "place": _place(r), "headline": r["headline"],
             "metric": r["metric"], "resolution_m": r["resolution_m"], "series": r["series"],
             "notes": r["notes"], "files": {"gif": r["files"]["gif"], "chart": r["files"]["chart"]},
+            "provenance": r["provenance"],
         }
         return _deliverable(payload, r["files"]["gif"], list(dict.fromkeys([frames[0], frames[-1]])))
 

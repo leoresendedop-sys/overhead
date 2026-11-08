@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 import unicodedata
 from functools import lru_cache
 from pathlib import Path
@@ -28,6 +29,9 @@ OVERLAY_COLORS: dict[str, list[tuple[str, str]]] = {
 PAD = 28
 GAP = 14
 MAX_WIDTH = 1800
+MIN_PANE_W = 360  # a tiny grid (a building, a stadium) is scaled up to at least this, pixel-sharp
+MAX_UPSCALED_H = 1200  # ...unless that would make the pane taller than this
+GIF_MAX_SIDE = 800
 
 
 FONT_CANDIDATES = (
@@ -139,9 +143,13 @@ def panel(
     f_title, f_line, f_cap, f_small = _font(34), _font(20), _font(18), _font(14)
 
     avail = MAX_WIDTH - 2 * PAD - 2 * GAP
-    pane_w = min(before.width, avail // 3)
+    scale = 1
+    if before.width < MIN_PANE_W:  # whole-pixel blocks, so 10 m pixels stay visible as pixels
+        scale = min(math.ceil(MIN_PANE_W / before.width), max(1, MAX_UPSCALED_H // before.height))
+    pane_w = min(before.width * scale, avail // 3)
     pane_h = max(1, round(before.height * pane_w / before.width))
-    panes = [im.convert("RGB").resize((pane_w, pane_h), Image.LANCZOS) for im in (before, after, change)]
+    resample = Image.NEAREST if pane_w > before.width else Image.LANCZOS
+    panes = [im.convert("RGB").resize((pane_w, pane_h), resample) for im in (before, after, change)]
     width = 2 * PAD + 3 * pane_w + 2 * GAP
     inner_w = width - 2 * PAD
 
@@ -212,9 +220,18 @@ def annotate_frame(img: Image.Image, label: str) -> Image.Image:
     return Image.alpha_composite(base, layer).convert("RGB")
 
 
-def save_gif(frames: list[Image.Image], path: Path, ms: int = 700) -> None:
-    """Adaptive-palette looping GIF."""
-    pal = [f.convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=256) for f in frames]
+def _fit_within(img: Image.Image, max_side: int) -> Image.Image:
+    scale = max_side / max(img.size)
+    if scale >= 1:
+        return img
+    return img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))), Image.LANCZOS)
+
+
+def save_gif(frames: list[Image.Image], path: Path, ms: int = 700, max_side: int = GIF_MAX_SIDE) -> None:
+    """Adaptive-palette looping GIF, the long side at most `max_side` (the frames are not changed:
+    the Desktop card shows its own, larger, copies)."""
+    pal = [_fit_within(f.convert("RGB"), max_side).convert("P", palette=Image.ADAPTIVE, colors=256)
+           for f in frames]
     pal[0].save(path, save_all=True, append_images=pal[1:], duration=ms, loop=0, optimize=True)
 
 

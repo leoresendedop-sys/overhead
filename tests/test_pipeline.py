@@ -603,3 +603,25 @@ def test_analysis_grid_of_a_long_thin_area_stays_small():
     area = _Area(aoi_from_geojson(RIVER_STRIP))
     assert area.res == 40 and max(area.grid.width, area.grid.height) <= 2600
     assert area.pixel_ha == 0.16
+
+
+# ---------------------------------------------------------------- dates (A7)
+
+def test_parse_date_this_month_as_a_point_is_at_most_today():
+    assert parse_date(f"{TODAY:%Y-%m}", field="after") == min(TODAY.replace(day=15), TODAY)
+    with pytest.raises(BadInput) as e:  # a full date in the future is still refused
+        parse_date((TODAY + timedelta(days=1)).isoformat(), field="after")
+    assert "future" in e.value.message
+
+
+def test_scenes_and_timelapse_take_a_single_day(tmp_cache, tmp_path):
+    day = date(2024, 9, 14)
+    r = run_scenes(AOI, day, day, tmp_cache, search=make_search([scene("2024-09-14")]),
+                   reader=make_reader({}))
+    assert [d["date"] for d in r["dates"]] == ["2024-09-14"]
+    t = run_timelapse(AOI, day, day, "month", "ndvi", tmp_cache, RunStore(tmp_path / "runs"),
+                      search=make_search([scene("2024-09-14")]), reader=make_reader({}))
+    assert [s["period"] for s in t["series"]] == ["2024-09"] and t["series"][0]["value"] is not None
+    with pytest.raises(BadInput):
+        run_timelapse(AOI, day, day - timedelta(days=1), "month", "ndvi", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=make_search([]), reader=make_reader({}))

@@ -9,7 +9,7 @@ Warm the cache before recording, with the data directory Hermes uses:
 
     OVERHEAD_DATA_ROOT=<hermes plugin data dir>/overhead OVERHEAD_LIVE=1 python -m pytest tests/test_live.py -s
 
-Cold times are network-bound, not code-bound (spec targets: 30 s for a compare, 90 s for a timelapse; the cold compares above miss the first). The cache MUST be warm before recording the video: run the live tests with `OVERHEAD_DATA_ROOT` first.
+Cold times are network-bound, not code-bound (spec targets: 30 s for a compare, 90 s for a timelapse; the cold compare times below miss the first). The cache MUST be warm before recording the video: run the live tests with `OVERHEAD_DATA_ROOT` first.
 
 Timings below are from one Apple-silicon Mac on home broadband. The live tests print the same
 numbers with `-s`.

@@ -157,7 +157,7 @@ def test_compare_text_when_no_vision(tools):
     assert set(data["place"]) == {"name", "full_name", "area_km2"} and data["place"]["full_name"] == "Testville"
     assert data["stats"]["burn"]["burned_ha"] == round(
         data["stats"]["burn"]["moderate_ha"] + data["stats"]["burn"]["high_ha"], 2)
-    assert "provenance" not in data and "thresholds" not in data  # kept in result.json
+    assert "thresholds" not in data  # kept in result.json
 
 
 def test_compare_envelope_when_vision(tools, h, monkeypatch):
@@ -202,7 +202,8 @@ def test_geojson_with_place_uses_place_as_title(plugin, tmp_path):
 def test_schemas_bound_the_place_numbers_and_ask_for_result_numbers(plugin):
     for schema in plugin.schemas.ALL:
         props = schema["parameters"]["properties"]
-        assert props["radius_km"]["exclusiveMinimum"] == 0 and props["radius_km"]["maximum"] == 100
+        assert props["radius_km"]["minimum"] == 0.1 and props["radius_km"]["maximum"] == 100
+        assert "exclusiveMinimum" not in props["radius_km"]  # some providers reject the keyword
         assert (props["lat"]["minimum"], props["lat"]["maximum"]) == (-90, 90)
         assert (props["lon"]["minimum"], props["lon"]["maximum"]) == (-180, 180)
         assert "only numbers to report" in schema["description"]
@@ -305,3 +306,41 @@ def test_locate_reports_the_grid_based_resolution(plugin, tmp_path):
     assert strip["resolution_m"] == 40
     err = error_of(tools["overhead_locate"]({"geojson": TWO_ISLANDS}))
     assert err["type"] == "area_too_large" and "2,600 px" in err["message"]
+
+
+# ---------------------------------------------------------------- provenance (A5), dates (A7)
+
+def test_payloads_carry_the_scenes_and_stac_items(tools):
+    data = json.loads(tools["overhead_compare"](dict(COMPARE)))
+    assert data["before"]["scenes"] == ["S2_2024-12-17_A"]
+    assert data["after"]["scenes"] == ["S2_2025-02-14_A"]
+    prov = data["provenance"]
+    assert prov["collection"] == "sentinel-2-l2a" and prov["stac"].startswith("https://")
+    assert prov["items"] == [s.self_url for s in SCENES]
+    lapse = json.loads(tools["overhead_timelapse"](
+        {"place": "x", "start": "2024-09-01", "end": "2024-12-31", "step": "month"}))
+    assert lapse["provenance"]["items"] == [s.self_url for s in LAPSE_SCENES]
+
+
+TODAY = date.today()
+LAST_MONTH = (TODAY.replace(day=1) - timedelta(days=1)).replace(day=1)
+
+
+@pytest.mark.parametrize("name,engine_call,args,want", [
+    ("overhead_compare", "run_compare", {"before": f"{LAST_MONTH:%Y-%m}", "after": f"{TODAY:%Y-%m}"},
+     (LAST_MONTH.replace(day=15), min(TODAY.replace(day=15), TODAY))),
+    ("overhead_scenes", "run_scenes", {"start": "2024-12-10", "end": "2024-12-10"},
+     (date(2024, 12, 10), date(2024, 12, 10))),
+    ("overhead_timelapse", "run_timelapse", {"start": "2024-09-14", "end": "2024-09-14"},
+     (date(2024, 9, 14), date(2024, 9, 14))),
+])
+def test_this_month_and_single_day_ranges_reach_the_engine(h, tmp_path, monkeypatch, name,
+                                                           engine_call, args, want):
+    seen = []
+
+    def capture(aoi, first, last, *a, **k):
+        seen.append((first, last))
+        raise _Seen()
+    monkeypatch.setattr(h, engine_call, capture)
+    out = h.make_handlers(tmp_path)[name]({"place": "x", **args})
+    assert seen == [want], out

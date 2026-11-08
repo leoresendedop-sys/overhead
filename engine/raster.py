@@ -14,10 +14,24 @@ import numpy as np
 import rasterio
 from affine import Affine
 from rasterio.enums import Resampling
+from rasterio.errors import RasterioIOError, WarpOperationError
 from rasterio.features import geometry_mask
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_geom
 
+try:  # GDAL's own HTTP / file / AWS errors, as rasterio raises them
+    from rasterio._err import (
+        CPLE_AWSError,
+        CPLE_FileIOError,
+        CPLE_HttpResponseError,
+        CPLE_OpenFailedError,
+    )
+    _GDAL_IO_ERRORS: tuple = (CPLE_AWSError, CPLE_FileIOError, CPLE_HttpResponseError,
+                              CPLE_OpenFailedError)
+except ImportError:  # pragma: no cover - a rasterio without these private names
+    _GDAL_IO_ERRORS = ()
+
+from .errors import NetworkError
 from .fsutil import write_atomic
 from .aoi import AOI, grid_shape, utm_bounds, utm_epsg
 from .stac import Scene
@@ -58,6 +72,7 @@ def _shared_pool() -> ThreadPoolExecutor:
             _pool = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="overhead-read")
         return _pool
 CATEGORICAL_BANDS = {"scl"}
+READ_ERRORS = (RasterioIOError, WarpOperationError, *_GDAL_IO_ERRORS)
 
 
 @dataclass(frozen=True)
@@ -96,7 +111,17 @@ def choose_overview(native_res: float, factors: list[int], target_res: float) ->
 
 
 def read_band(href: str, grid: Grid, *, categorical: bool = False) -> np.ndarray:
-    """Read one band onto `grid` as uint16 (0 = nodata)."""
+    """Read one band onto `grid` as uint16 (0 = nodata). A failed read over HTTPS (the image server
+    busy or unreachable) is a transient NetworkError, so the tool answers "network", not "internal"."""
+    try:
+        return _read_band(href, grid, categorical)
+    except READ_ERRORS as e:
+        name = href.rsplit("/", 1)[-1]
+        raise NetworkError(f"Reading the Sentinel-2 image {name} failed ({e}). The image server may "
+                           "be busy: try again in a minute.", transient=True) from e
+
+
+def _read_band(href: str, grid: Grid, categorical: bool) -> np.ndarray:
     if categorical:
         resampling = Resampling.nearest
     elif grid.res > 10:
