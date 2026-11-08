@@ -41,7 +41,7 @@ at the bottom of the frame, which tells the story best.
 **Prompt**
 
 > Use the Overhead tool on the area around lat -7.05, lon -55.40 (radius 10 km, call it "Novo
-> Progresso, Brazil"). Compare 2019-08-01 with 2025-08-01, focusing on vegetation. How much forest
+> Progresso, Pará"). Compare 2019-08-01 with 2025-08-01, focusing on vegetation. How much forest
 > was lost?
 
 **Expected call:** `overhead_compare`
