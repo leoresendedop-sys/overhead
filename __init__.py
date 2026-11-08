@@ -53,8 +53,9 @@ def _lazy_handlers(data_root: Path) -> dict:
                 return json.dumps({"error": {
                     "type": "internal",
                     "message": f"The Overhead engine could not load ({type(e).__name__}: {e}). "
-                               "Its Python dependency rasterio may be missing from the Hermes "
-                               "environment."}})
+                               "Its Python dependency rasterio may be missing, or Hermes was "
+                               "started before it was installed: restart Hermes (hermes "
+                               "gateway restart) and try again."}})
             return real(args, **kwargs)
         handler.__name__ = name
         return handler

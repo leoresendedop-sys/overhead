@@ -31,17 +31,19 @@ image every few days since 2017). Every answer is backed by a tool result. Never
   `lat`, `lon` and `radius_km` (default 5), and keep `place` as the title.
 - Dates are `YYYY-MM-DD` or `YYYY-MM`. Turn "January 2025" into `2025-01`. For an event, put
   `before` a few weeks ahead of it and `after` a few weeks past it.
-- `ambiguous_place`: show the candidates and ask which one, or retry with lat/lon.
 
 ## Report the result
 
 1. Lead with the `headline`. Quote only numbers that appear in the result (hectares, dates,
    clear fractions). Do not convert, round further or add your own estimates.
-2. Always state the `confidence` and the `resolution_m`, and pass on every item in `notes`.
-3. Say which image dates were used (`before.date`, `after.date`); they can differ from the
-   requested dates. Mention a composite when `composite` is true.
-4. End the reply with the `deliver` line, copied verbatim (`MEDIA:/path/...`). It is how the
-   panel or GIF reaches the user.
+2. Always state the `resolution_m` and pass on every item in `notes`. For a compare, also state
+   the `confidence`.
+3. For a compare, say which image dates were used (`before.date`, `after.date`); they can differ
+   from the requested dates. Mention a composite when `composite` is true. For a timelapse,
+   name the periods with no clear image (`date` is null).
+4. End the reply with the line the `instruction` gives (`MEDIA:/path/...`), exactly as written,
+   on a line of its own: not inside code, quotes or a sentence. It is how the panel or GIF
+   reaches the user.
 5. If you can see the attached images, describe what is visible in a sentence or two.
 
 ## Limits to explain when relevant
@@ -57,6 +59,11 @@ image every few days since 2017). Every answer is backed by a tool result. Never
 
 ## Errors
 
-Every error has a `type` and a `message` that says what to do. `bad_input`: fix the argument
-(often a date). `no_clear_scene`: try the suggested dates. `area_too_large`: use a smaller
-area. `network`: retry once, then tell the user.
+Every error has a `type` and a `message` that says what to do:
+- `bad_input`: fix the argument (often a date or a reversed range).
+- `place_not_found`: try a more specific name, or lat/lon.
+- `ambiguous_place`: show the candidates and ask, or retry with one candidate's lat/lon.
+- `area_too_large`: use a smaller area.
+- `no_clear_scene`: try the suggested dates, or overhead_scenes.
+- `network`: retry once, then tell the user.
+- `internal`: tell the user what failed; do not invent a result.

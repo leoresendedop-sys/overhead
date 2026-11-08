@@ -22,7 +22,7 @@ from .engine.runs import RunStore
 
 logger = logging.getLogger(__name__)
 
-INSTRUCTION = "Include the deliver line verbatim at the end of your reply."
+INSTRUCTION = "End your reply with this exact line: "
 
 
 class _Internal(OverheadError):
@@ -39,7 +39,7 @@ def want_images() -> bool:
 
 
 def _json(obj: dict) -> str:
-    return json.dumps(obj, ensure_ascii=False)
+    return json.dumps(obj, ensure_ascii=False, default=str)  # never raises on odd details
 
 
 def _or(args: dict, key: str, default):
@@ -55,10 +55,18 @@ def _date(args: dict, field: str):
     return parse_date(value, field=field)
 
 
+def _range(args: dict, first: str, last: str, message: str):
+    """Both dates of a range, checked before any place lookup (which is network I/O)."""
+    a, b = _date(args, first), _date(args, last)
+    if b <= a:
+        raise BadInput(message)
+    return a, b
+
+
 def _aoi(args: dict, cache_dir: Path):
-    args = {k: v for k, v in args.items() if v is not None}  # a null field means "not given"
+    args = {k: v for k, v in args.items() if v is not None and v != ""}  # empty means not given
     aoi = resolve_aoi(args, cache_dir)
-    if args.get("place") and aoi.source == "point":  # place plus lat/lon: the place is the title
+    if args.get("place") and aoi.source in ("point", "geojson"):  # then the place is only a title
         aoi = dataclasses.replace(aoi, name=str(args["place"]).strip())
     return aoi
 
@@ -74,7 +82,7 @@ def _side(side: dict) -> dict:
 def _deliverable(payload: dict, media: str, previews: list[str]) -> str | dict:
     """Add the deliver line; wrap in the multimodal envelope when the model can see images."""
     payload["deliver"] = f"MEDIA:{media}"
-    payload["instruction"] = INSTRUCTION
+    payload["instruction"] = INSTRUCTION + payload["deliver"]
     text = _json(payload)
     if not want_images():
         return text
@@ -89,7 +97,7 @@ def _deliverable(payload: dict, media: str, previews: list[str]) -> str | dict:
     return {
         "_multimodal": True,
         "content": [{"type": "text", "text": text}, *images],
-        "text_summary": f"{payload['headline']}\n{payload['deliver']}",
+        "text_summary": text,  # what text-only providers and resumed sessions get: keep it all
     }
 
 
@@ -104,7 +112,7 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
                       "source": aoi.source, "resolution_m": resolution_for_area(aoi.area_km2)})
 
     def scenes(args: dict):
-        start, end = _date(args, "start"), _date(args, "end")
+        start, end = _range(args, "start", "end", "end must be after start.")
         n = _or(args, "max_results", 12)
         if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 30:
             raise BadInput("max_results must be a whole number between 1 and 30.")
@@ -112,7 +120,8 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
         return _json({"place": _place(r), "dates": r["dates"]})
 
     def compare(args: dict):
-        before, after = _date(args, "before"), _date(args, "after")
+        before, after = _range(args, "before", "after",
+                               "after must be later than before; swap the two dates.")
         aoi = _aoi(args, cache_dir)
         r = run_compare(aoi, before, after, _or(args, "focus", "auto"),
                         _or(args, "window_days", 30), cache_dir, store)
@@ -125,7 +134,7 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
         return _deliverable(payload, r["files"]["panel"], [r["files"]["before"], r["files"]["after"]])
 
     def timelapse(args: dict):
-        start, end = _date(args, "start"), _date(args, "end")
+        start, end = _range(args, "start", "end", "end must be after start.")
         aoi = _aoi(args, cache_dir)
         r = run_timelapse(aoi, start, end, _or(args, "step", "month"), _or(args, "metric", "ndvi"),
                           cache_dir, store)

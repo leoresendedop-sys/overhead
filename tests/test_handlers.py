@@ -54,9 +54,17 @@ def test_compare_rejects_bad_dates(tools, h, monkeypatch, before, after, field, 
     assert calls == []  # a bad date never reaches place lookup, which is network I/O
 
 
-def test_compare_rejects_inverted_range(tools):
-    err = error_of(tools["overhead_compare"]({"place": "x", "before": "2025-02-15", "after": "2024-12-15"}))
-    assert err["type"] == "bad_input" and "swap" in err["message"]
+@pytest.mark.parametrize("name,args,hint", [
+    ("overhead_compare", {"before": "2025-02-15", "after": "2024-12-15"}, "swap"),
+    ("overhead_compare", {"before": "2025-02", "after": "2025-02-15"}, "swap"),  # same day
+    ("overhead_timelapse", {"start": "2025-06", "end": "2025-01"}, "after start"),
+    ("overhead_scenes", {"start": "2025-06-01", "end": "2025-01-01"}, "after start"),
+])
+def test_inverted_range_rejected_before_place_lookup(tools, h, monkeypatch, name, args, hint):
+    calls = []
+    monkeypatch.setattr(h, "resolve_aoi", lambda a, cache_dir: calls.append(a))
+    err = error_of(tools[name]({"place": "x", **args}))
+    assert err["type"] == "bad_input" and hint in err["message"] and calls == []
 
 
 def test_compare_missing_date_is_bad_input(tools):
@@ -64,19 +72,40 @@ def test_compare_missing_date_is_bad_input(tools):
     assert err["type"] == "bad_input" and "before" in err["message"]
 
 
-@pytest.mark.parametrize("name,args", [
-    ("overhead_locate", {"place": "x"}),
-    ("overhead_scenes", {"place": "x", "start": "2024-01-01", "end": "2024-02-01"}),
-    ("overhead_compare", COMPARE),
-    ("overhead_timelapse", {"place": "x", "start": "2024-01", "end": "2024-06"}),
-])
-def test_handler_never_raises(h, tmp_path, monkeypatch, name, args):
+CALLS = {
+    "overhead_locate": ({"place": "x"}, "resolution_for_area"),
+    "overhead_scenes": ({"place": "x", "start": "2024-01-01", "end": "2024-02-01"}, "run_scenes"),
+    "overhead_compare": (COMPARE, "run_compare"),
+    "overhead_timelapse": ({"place": "x", "start": "2024-01", "end": "2024-06"}, "run_timelapse"),
+}
+
+
+@pytest.mark.parametrize("name", CALLS)
+def test_handler_never_raises(h, tmp_path, monkeypatch, name):
+    args, engine_call = CALLS[name]
+
     def boom(*a, **k):
         raise RuntimeError("boom")
-    for target in ("resolve_aoi", "run_compare", "run_scenes", "run_timelapse"):
-        monkeypatch.setattr(h, target, boom)
-    err = error_of(h.make_handlers(tmp_path)[name](args, task_id="t1"))
+    monkeypatch.setattr(h, engine_call, boom)  # raises inside the engine step, after the AOI
+    err = error_of(h.make_handlers(tmp_path)[name](dict(args), task_id="t1"))
     assert err["type"] == "internal" and "boom" in err["message"]
+
+
+@pytest.mark.parametrize("name", ["overhead_scenes", "overhead_compare", "overhead_timelapse"])
+def test_malformed_engine_result_is_internal(h, tmp_path, monkeypatch, name):
+    args, engine_call = CALLS[name]
+    monkeypatch.setattr(h, engine_call, lambda *a, **k: {"place": {}})  # breaks payload building
+    err = error_of(h.make_handlers(tmp_path)[name](dict(args)))
+    assert err["type"] == "internal"
+
+
+def test_error_details_that_are_not_json_still_serialize(h, tmp_path, monkeypatch, plugin):
+    def no_clear(*a, **k):
+        raise plugin.engine.errors.NoClearScene("No clear image.", target=date(2025, 1, 15),
+                                                where=Path("/x"))
+    monkeypatch.setattr(h, "run_compare", no_clear)
+    err = error_of(h.make_handlers(tmp_path)["overhead_compare"](dict(COMPARE)))
+    assert err["type"] == "no_clear_scene" and err["target"] == "2025-01-15" and err["where"] == "/x"
 
 
 def test_overhead_error_keeps_its_details(h, tmp_path, monkeypatch, plugin):
@@ -96,7 +125,7 @@ def test_compare_text_when_no_vision(tools):
     data = json.loads(out)
     assert data["deliver"] == "MEDIA:" + data["files"]["panel"]
     assert data["deliver"].endswith("panel.png") and Path(data["files"]["panel"]).exists()
-    assert "verbatim" in data["instruction"]
+    assert data["instruction"] == "End your reply with this exact line: " + data["deliver"]
     assert data["headline"].startswith("≈ ") and data["confidence"] == "high"
     assert data["resolution_m"] == 10 and data["stats"]["burn"]["high_ha"] >= 0
     assert data["before"]["date"] == "2024-12-17" and data["after"]["clear_fraction"] == 1.0
@@ -113,7 +142,8 @@ def test_compare_envelope_when_vision(tools, h, monkeypatch):
     assert all(p["image_url"]["url"].startswith("data:image/jpeg;base64,") for p in images)
     text = json.loads(out["content"][0]["text"])
     assert text["deliver"].startswith("MEDIA:")
-    assert "MEDIA:" in out["text_summary"] and text["headline"] in out["text_summary"]
+    # the summary is what text-only providers and resumed sessions see: keep every number
+    assert out["text_summary"] == out["content"][0]["text"]
 
 
 def test_point_with_place_uses_place_as_title(plugin, tmp_path):
@@ -124,11 +154,30 @@ def test_point_with_place_uses_place_as_title(plugin, tmp_path):
     assert data["resolution_m"] == 10 and 15 < data["area_km2"] < 17 and len(data["bbox"]) == 4
 
 
-def test_null_place_fields_mean_not_given(plugin, tmp_path):
+@pytest.mark.parametrize("empty", [None, ""])
+def test_empty_place_fields_mean_not_given(plugin, tmp_path, empty):
     loc = plugin.handlers.make_handlers(tmp_path)["overhead_locate"](
-        {"place": "Altadena", "lat": 34.19, "lon": -118.13, "radius_km": None, "geojson": None})
+        {"place": "Altadena", "lat": 34.19, "lon": -118.13, "radius_km": empty, "geojson": empty})
     data = json.loads(loc)
     assert data["name"] == "Altadena" and 99 < data["area_km2"] < 101  # default radius 5 km
+
+
+def test_geojson_with_place_uses_place_as_title(plugin, tmp_path):
+    square = {"type": "Polygon", "coordinates": [[[-118.15, 34.18], [-118.11, 34.18],
+                                                  [-118.11, 34.21], [-118.15, 34.21],
+                                                  [-118.15, 34.18]]]}
+    data = json.loads(plugin.handlers.make_handlers(tmp_path)["overhead_locate"](
+        {"place": "Altadena", "geojson": json.dumps(square)}))
+    assert data["name"] == "Altadena" and data["source"] == "geojson"
+
+
+def test_schemas_bound_the_place_numbers_and_ask_for_result_numbers(plugin):
+    for schema in plugin.schemas.ALL:
+        props = schema["parameters"]["properties"]
+        assert props["radius_km"]["exclusiveMinimum"] == 0 and props["radius_km"]["maximum"] == 100
+        assert (props["lat"]["minimum"], props["lat"]["maximum"]) == (-90, 90)
+        assert (props["lon"]["minimum"], props["lon"]["maximum"]) == (-180, 180)
+        assert "only numbers to report" in schema["description"]
 
 
 def test_timelapse_delivers_gif_with_first_and_last_frame(tools, h, monkeypatch):
@@ -139,7 +188,7 @@ def test_timelapse_delivers_gif_with_first_and_last_frame(tools, h, monkeypatch)
     monkeypatch.setattr(h, "want_images", lambda: True)
     env = tools["overhead_timelapse"](dict(args))
     assert sum(p["type"] == "image_url" for p in env["content"]) == 2
-    assert "timelapse.gif" in env["text_summary"]
+    assert env["text_summary"] == env["content"][0]["text"] and "timelapse.gif" in env["text_summary"]
 
 
 def test_want_images_is_false_without_hermes(plugin, monkeypatch):
@@ -202,3 +251,4 @@ def test_tools_report_a_missing_engine(plugin, storage, monkeypatch):
     plugin.register(ctx)
     err = error_of(ctx.handlers["overhead_locate"]({"place": "x"}))
     assert err["type"] == "internal" and "rasterio" in err["message"]
+    assert "hermes gateway restart" in err["message"]  # a process started before the install

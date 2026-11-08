@@ -4,8 +4,8 @@ from __future__ import annotations
 
 DATES = "Dates are YYYY-MM-DD or YYYY-MM (a month means its 15th), from 2017-03-28 to today."
 NUMBERS = "The numbers in the result are the only numbers to report; never estimate your own."
-DELIVER = ("The result has a deliver line (MEDIA:<path>): copy it verbatim as the last line "
-           "of your reply so the image reaches the user.")
+DELIVER = ("The result's instruction gives a line MEDIA:<path>: end your reply with exactly that "
+           "line, on a line of its own (not in code or quotes), so the image reaches the user.")
 
 PLACE = {
     "place": {
@@ -13,11 +13,14 @@ PLACE = {
         "description": "Place name to look up, e.g. 'Altadena, California'. With lat/lon it is only "
                        "the title.",
     },
-    "lat": {"type": "number", "description": "Latitude of the centre of a square area (use with lon)."},
-    "lon": {"type": "number", "description": "Longitude of the centre of a square area (use with lat)."},
+    "lat": {"type": "number", "minimum": -90, "maximum": 90,
+            "description": "Latitude of the centre of a square area (use with lon)."},
+    "lon": {"type": "number", "minimum": -180, "maximum": 180,
+            "description": "Longitude of the centre of a square area (use with lat)."},
     "radius_km": {
         "type": "number",
         "default": 5,
+        "exclusiveMinimum": 0,
         "maximum": 100,
         "description": "Half the side of the square around lat/lon, in km (greater than 0, at most 100).",
     },
@@ -50,7 +53,7 @@ LOCATE = _schema(
     "overhead_locate",
     "Resolve a place to the exact area Overhead will analyse: name, bbox, area in km2 and the "
     "analysis resolution. Optional: the other overhead tools accept the same place fields. Use it "
-    "to check an ambiguous or very large place before a slow analysis. " + WHERE,
+    "to check an ambiguous or very large place before a slow analysis. " + WHERE + " " + NUMBERS,
     {},
     [],
 )
@@ -60,7 +63,7 @@ SCENES = _schema(
     "List the Sentinel-2 dates in a range, ranked by how much of the requested area is cloud-free "
     "(aoi_clear_fraction, 0 to 1). Use it when the user's dates are vague ('last summer', 'after "
     "the storm') or when a compare fails with no_clear_scene, then pass the best dates to "
-    "overhead_compare. " + WHERE + " " + DATES,
+    "overhead_compare. " + WHERE + " " + DATES + " " + NUMBERS,
     {
         "start": _date("Start of the range"),
         "end": _date("End of the range"),
