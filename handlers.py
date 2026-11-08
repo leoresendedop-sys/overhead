@@ -56,6 +56,7 @@ def _date(args: dict, field: str):
 
 
 def _aoi(args: dict, cache_dir: Path):
+    args = {k: v for k, v in args.items() if v is not None}  # a null field means "not given"
     aoi = resolve_aoi(args, cache_dir)
     if args.get("place") and aoi.source == "point":  # place plus lat/lon: the place is the title
         aoi = dataclasses.replace(aoi, name=str(args["place"]).strip())

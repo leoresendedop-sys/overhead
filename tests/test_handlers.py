@@ -124,6 +124,13 @@ def test_point_with_place_uses_place_as_title(plugin, tmp_path):
     assert data["resolution_m"] == 10 and 15 < data["area_km2"] < 17 and len(data["bbox"]) == 4
 
 
+def test_null_place_fields_mean_not_given(plugin, tmp_path):
+    loc = plugin.handlers.make_handlers(tmp_path)["overhead_locate"](
+        {"place": "Altadena", "lat": 34.19, "lon": -118.13, "radius_km": None, "geojson": None})
+    data = json.loads(loc)
+    assert data["name"] == "Altadena" and 99 < data["area_km2"] < 101  # default radius 5 km
+
+
 def test_timelapse_delivers_gif_with_first_and_last_frame(tools, h, monkeypatch):
     args = {"place": "x", "start": "2024-09-01", "end": "2024-12-31", "step": "month"}
     text = json.loads(tools["overhead_timelapse"](dict(args)))
