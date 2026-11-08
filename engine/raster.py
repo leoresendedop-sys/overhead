@@ -42,6 +42,7 @@ GDAL_OPTIONS = {
     "GDAL_INGESTED_BYTES_AT_OPEN": "32768",
     "GDAL_HTTP_MAX_RETRY": "3",
     "GDAL_HTTP_RETRY_DELAY": "1",
+    "GDAL_HTTP_NETRC": "NO",  # public data: never send credentials from ~/.netrc
 }
 MAX_WORKERS = 12
 _OVERVIEW_PROBE: dict[tuple[str, int], int | None] = {}  # (href, target res) -> overview index

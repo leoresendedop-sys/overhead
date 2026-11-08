@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.aoi import USER_AGENT, aoi_from_point
+from engine.aoi import USER_AGENT, aoi_from_geojson, aoi_from_point
 from engine.errors import NetworkError
 from engine.stac import STAC_URL, group_by_date, search_scenes
 
@@ -51,11 +51,23 @@ def test_request_shape(tmp_cache):
     url, body, headers = post.calls[0]
     assert url == STAC_URL + "/search"
     assert body["collections"] == ["sentinel-2-l2a"]
-    assert body["intersects"] == AOI.geometry
+    assert body["bbox"] == list(AOI.bbox)
+    assert "intersects" not in body
     assert body["query"] == {"eo:cloud_cover": {"lt": 80}}
     assert body["limit"] == 100
     assert body["datetime"] == "2025-02-01T00:00:00Z/2025-02-20T23:59:59Z"
     assert headers["User-Agent"] == USER_AGENT
+
+
+def test_request_sends_only_the_bbox_of_a_polygon(tmp_cache):
+    """A user's own boundary (a farm, say) never leaves the machine: only its bounding box does."""
+    farm = aoi_from_geojson({"type": "Polygon", "coordinates": [[
+        [-47.01, -23.10], [-46.98, -23.11], [-46.97, -23.08], [-47.00, -23.07], [-47.01, -23.10]]]})
+    post = FakePost()
+    search_scenes(farm, *PAST, tmp_cache, post=post, today=date(2026, 11, 7))
+    body = post.calls[0][1]
+    assert body["bbox"] == list(farm.bbox) == [-47.01, -23.11, -46.97, -23.07]
+    assert "intersects" not in body and "-46.98" not in json.dumps(body)
 
 
 def test_epsg_from_proj_code(tmp_cache):

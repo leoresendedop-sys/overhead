@@ -96,7 +96,7 @@ def search_scenes(
 ) -> list[Scene]:
     request = {
         "collections": [COLLECTION],
-        "intersects": aoi.geometry,
+        "bbox": list(aoi.bbox),  # not the polygon: a user's boundary never leaves the machine
         "datetime": f"{start.isoformat()}T00:00:00Z/{end.isoformat()}T23:59:59Z",
         "query": {"eo:cloud_cover": {"lt": max_cloud}},
         "limit": PAGE_LIMIT,

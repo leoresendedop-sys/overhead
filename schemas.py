@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-DATES = "Dates are YYYY-MM-DD or YYYY-MM (a month means its 15th), from 2017-03-28 to today."
+DATES = ("Dates are YYYY-MM-DD or YYYY-MM, from 2017-03-28 to today. A month is the whole month "
+         "as the start or end of a range, and its 15th as before or after.")
 NUMBERS = "The numbers in the result are the only numbers to report; never estimate your own."
 STATS = ("Report `headline` and the stats exactly as given. Never add, subtract or recompute "
          "figures. `burn.low_ha` is low-severity change (often seasonal or urban noise) and is NOT "

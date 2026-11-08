@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -63,21 +64,32 @@ METRICS = {
 _DATE_RE = re.compile(r"^(\d{4})-(\d{2})(?:-(\d{2}))?$")
 
 
-def parse_date(s: str, *, field: str) -> date:
+ROLES = ("point", "start", "end")
+
+
+def parse_date(s: str, *, field: str, role: str = "point") -> date:
+    """YYYY-MM-DD as given, or YYYY-MM. A month is its 15th for a point in time (compare's before
+    and after) and the whole month in a range: the 1st as its start, the last day as its end,
+    clamped to the dates Sentinel-2 L2A covers (2017-03-28 to today)."""
+    if role not in ROLES:
+        raise ValueError(f"role must be one of {ROLES}")
     hint = f"{field} '{s}' is not usable: use YYYY-MM-DD or YYYY-MM, or call overhead_scenes."
     m = _DATE_RE.match(str(s).strip())
     if not m:
         raise BadInput(hint)
-    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3) or 15)
+    y, mo, day = int(m.group(1)), int(m.group(2)), m.group(3)
     try:
-        out = date(y, mo, d)
+        if day or role == "point":
+            first = last = date(y, mo, int(day or 15))
+        else:
+            first, last = date(y, mo, 1), date(y, mo, calendar.monthrange(y, mo)[1])
     except ValueError:
         raise BadInput(hint)
-    if out > date.today():
+    if first > date.today():
         raise BadInput(f"{field} '{s}' is in the future; Sentinel-2 imagery only exists up to today.")
-    if out < FIRST_DATE:
+    if last < FIRST_DATE:
         raise BadInput(f"{field} '{s}' is too early; Sentinel-2 L2A coverage starts on 2017-03-28.")
-    return out
+    return max(first, FIRST_DATE) if role == "start" else min(last, date.today())
 
 
 # ---------------------------------------------------------------- helpers

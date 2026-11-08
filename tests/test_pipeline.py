@@ -60,6 +60,34 @@ def test_parse_date_variants():
         assert "after" in e.value.message
 
 
+def test_parse_date_month_in_a_range_covers_the_whole_month():
+    assert parse_date("2024-06", field="start", role="start") == date(2024, 6, 1)
+    assert parse_date("2024-06", field="end", role="end") == date(2024, 6, 30)
+    assert parse_date("2024-02", field="end", role="end") == date(2024, 2, 29)  # leap year
+    assert parse_date("2023-02", field="end", role="end") == date(2023, 2, 28)
+    assert parse_date("2024-10", field="before") == date(2024, 10, 15)  # compare keeps the 15th
+    assert parse_date("2024-10", field="before", role="point") == date(2024, 10, 15)
+    for role in ("point", "start", "end"):  # a full date is taken as given
+        assert parse_date("2024-10-03", field="x", role=role) == date(2024, 10, 3)
+
+
+def test_parse_date_range_month_is_clamped_to_the_data():
+    this_month = f"{TODAY:%Y-%m}"
+    assert parse_date(this_month, field="end", role="end") == TODAY
+    assert parse_date(this_month, field="start", role="start") == TODAY.replace(day=1)
+    assert parse_date("2017-03", field="start", role="start") == date(2017, 3, 28)
+    next_month = (TODAY.replace(day=28) + timedelta(days=7)).replace(day=1)
+    for role in ("start", "end"):
+        with pytest.raises(BadInput) as e:
+            parse_date(f"{next_month:%Y-%m}", field="end", role=role)
+        assert "future" in e.value.message
+        with pytest.raises(BadInput) as e:
+            parse_date("2017-02", field="start", role=role)
+        assert "2017-03-28" in e.value.message
+    with pytest.raises(BadInput):
+        parse_date((TODAY + timedelta(days=3)).isoformat(), field="end", role="end")
+
+
 def test_compare_writes_layers_and_result(tmp_cache, tmp_path):
     scenes = [scene("2024-12-17"), scene("2025-02-14")]
     store = RunStore(tmp_path / "runs")

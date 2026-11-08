@@ -145,3 +145,8 @@ def test_gdal_options_ask_for_header_bytes_and_retries():
     assert raster.GDAL_OPTIONS["GDAL_INGESTED_BYTES_AT_OPEN"] == "32768"
     assert raster.GDAL_OPTIONS["GDAL_HTTP_MAX_RETRY"] == "3"
     assert raster.GDAL_OPTIONS["GDAL_HTTP_RETRY_DELAY"] == "1"
+
+
+def test_gdal_options_never_read_netrc():
+    """libcurl must not pick up credentials from ~/.netrc for the public COG reads."""
+    assert raster.GDAL_OPTIONS["GDAL_HTTP_NETRC"] == "NO"

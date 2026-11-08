@@ -48,16 +48,20 @@ def _or(args: dict, key: str, default):
     return default if value is None or value == "" else value
 
 
-def _date(args: dict, field: str):
+def _date(args: dict, field: str, role: str = "point"):
     value = _or(args, field, None)
     if value is None:
         raise BadInput(f"{field} is required: use YYYY-MM-DD or YYYY-MM.")
-    return parse_date(value, field=field)
+    return parse_date(value, field=field, role=role)
 
 
-def _range(args: dict, first: str, last: str, message: str):
-    """Both dates of a range, checked before any place lookup (which is network I/O)."""
-    a, b = _date(args, first), _date(args, last)
+def _range(args: dict, first: str, last: str, message: str, *, months: str = "whole"):
+    """Both dates of a range, checked before any place lookup (which is network I/O).
+
+    months="whole": a YYYY-MM start is its 1st and a YYYY-MM end its last day (scenes, timelapse).
+    months="mid": each YYYY-MM is its 15th (compare's before and after are points in time)."""
+    roles = ("start", "end") if months == "whole" else ("point", "point")
+    a, b = _date(args, first, roles[0]), _date(args, last, roles[1])
     if b <= a:
         raise BadInput(message)
     return a, b
@@ -123,7 +127,7 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
 
     def compare(args: dict):
         before, after = _range(args, "before", "after",
-                               "after must be later than before; swap the two dates.")
+                               "after must be later than before; swap the two dates.", months="mid")
         aoi = _aoi(args, cache_dir)
         r = run_compare(aoi, before, after, _or(args, "focus", "auto"),
                         _or(args, "window_days", 30), cache_dir, store)

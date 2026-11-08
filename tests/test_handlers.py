@@ -67,6 +67,30 @@ def test_inverted_range_rejected_before_place_lookup(tools, h, monkeypatch, name
     assert err["type"] == "bad_input" and hint in err["message"] and calls == []
 
 
+class _Seen(Exception):
+    pass
+
+
+@pytest.mark.parametrize("name,engine_call,args,want", [
+    ("overhead_timelapse", "run_timelapse", {"start": "2024-06", "end": "2024-12"},
+     (date(2024, 6, 1), date(2024, 12, 31))),
+    ("overhead_scenes", "run_scenes", {"start": "2024-02", "end": "2024-02"},
+     (date(2024, 2, 1), date(2024, 2, 29))),
+    ("overhead_compare", "run_compare", {"before": "2024-06", "after": "2024-12"},
+     (date(2024, 6, 15), date(2024, 12, 15))),
+])
+def test_month_dates_reach_the_engine(h, tmp_path, monkeypatch, name, engine_call, args, want):
+    """A month in a range is the whole month; compare's before/after month is its 15th."""
+    seen = []
+
+    def capture(aoi, first, last, *a, **k):
+        seen.append((first, last))
+        raise _Seen()
+    monkeypatch.setattr(h, engine_call, capture)
+    h.make_handlers(tmp_path)[name]({"place": "x", **args})
+    assert seen == [want]
+
+
 def test_compare_missing_date_is_bad_input(tools):
     err = error_of(tools["overhead_compare"]({"place": "x", "after": "2025-01-01"}))
     assert err["type"] == "bad_input" and "before" in err["message"]
@@ -187,6 +211,8 @@ def test_schemas_bound_the_place_numbers_and_ask_for_result_numbers(plugin):
     assert "Never add, subtract or recompute figures." in compare
     assert "`burn.low_ha` is low-severity change (often seasonal or urban noise) and is NOT " \
            "counted as burned." in compare
+    for schema in plugin.schemas.ALL[1:]:  # the tools that take dates
+        assert "whole month" in schema["description"] and "its 15th" in schema["description"]
 
 
 def test_timelapse_delivers_gif_with_first_and_last_frame(tools, h, monkeypatch):
