@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import date, timedelta
 
 import numpy as np
@@ -84,6 +85,34 @@ def Path_exists(p):
     return Path(p).exists()
 
 
+@pytest.mark.parametrize("after_scenes,clear,expected", [
+    # nearest date cloudier in metadata than two later ones: the nearest clear date still wins
+    ([scene("2025-02-14", 20), scene("2025-03-08", 1), scene("2025-03-13", 2)], {}, "2025-02-14"),
+    # nearly clear and near beats fully clear and far
+    ([scene("2025-02-14", 20), scene("2025-03-08", 1), scene("2025-03-13", 2)],
+     {"2025-02-14": 0.96}, "2025-02-14"),
+    # metadata cloud above 30 % is tried last, even when it is the nearest date
+    ([scene("2025-02-15", 70), scene("2025-02-20", 5), scene("2025-03-08", 1)], {}, "2025-02-20"),
+])
+def test_compare_picks_the_closest_clear_date(tmp_cache, tmp_path, after_scenes, clear, expected):
+    scenes = [scene("2024-12-17")] + after_scenes
+    r = run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "auto", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=make_search(scenes), reader=make_reader(clear))
+    assert r["after"]["date"] == expected
+
+
+def test_place_carries_the_full_name(tmp_cache):
+    named = replace(AOI, name="Testville, California",
+                    full_name="Testville, Some County, California, United States")
+    r = run_scenes(named, date(2024, 12, 1), date(2024, 12, 31), tmp_cache,
+                   search=make_search([scene("2024-12-10")]), reader=make_reader({}))
+    assert r["place"]["name"] == "Testville, California"
+    assert r["place"]["full_name"] == "Testville, Some County, California, United States"
+    plain = run_scenes(AOI, date(2024, 12, 1), date(2024, 12, 31), tmp_cache,
+                       search=make_search([scene("2024-12-10")]), reader=make_reader({}))
+    assert plain["place"]["full_name"] == "Testville"
+
+
 def test_compare_uses_composite_when_cloudy(tmp_cache, tmp_path):
     scenes = [scene(f"2024-12-{d}") for d in (10, 14, 18)] + [scene("2025-02-14")]
     clear = {"2024-12-10": 0.6, "2024-12-14": 0.6, "2024-12-18": 0.6}
@@ -150,10 +179,15 @@ def test_run_store_rejects_traversal(tmp_path):
 
 
 def _stats(**kw):
+    """Stats with the totals change_stats adds (burned_ha, net_ha)."""
     base = {"vegetation": {"lost_ha": 0.0, "gained_ha": 0.0},
             "burn": {"low_ha": 0.0, "moderate_ha": 0.0, "high_ha": 0.0},
             "water": {"before_ha": 0.0, "after_ha": 0.0, "lost_ha": 0.0, "gained_ha": 0.0}}
     base.update(kw)
+    v, b, w = base["vegetation"], base["burn"], base["water"]
+    v["net_ha"] = round(v["gained_ha"] - v["lost_ha"], 2)
+    b["burned_ha"] = round(b["moderate_ha"] + b["high_ha"], 2)
+    w["net_ha"] = round(w["after_ha"] - w["before_ha"], 2)
     return base
 
 

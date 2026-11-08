@@ -138,21 +138,22 @@ def change_stats(before: dict, after: dict, aoi: np.ndarray, pixel_ha: float) ->
     water_loss = w_b & ~w_a
     water_gain = ~w_b & w_a
 
+    veg = {"lost_ha": _ha(veg_loss, pixel_ha), "gained_ha": _ha(veg_gain, pixel_ha)}
+    burn = {"low_ha": _ha(burn_low, pixel_ha), "moderate_ha": _ha(burn_mod, pixel_ha),
+            "high_ha": _ha(burn_high, pixel_ha)}
+    water = {"before_ha": _ha(w_b, pixel_ha), "after_ha": _ha(w_a, pixel_ha),
+             "lost_ha": _ha(water_loss, pixel_ha), "gained_ha": _ha(water_gain, pixel_ha)}
+    # ready-made totals, so nobody has to add figures up: low severity is not counted as burned
+    veg["net_ha"] = round(veg["gained_ha"] - veg["lost_ha"], 2)
+    burn["burned_ha"] = round(burn["moderate_ha"] + burn["high_ha"], 2)
+    water["net_ha"] = round(water["after_ha"] - water["before_ha"], 2)
+
     return {
         "valid_fraction": round(valid_fraction, 4),
         "confidence": "low" if valid_fraction < LOW_CONF_VALID else "high",
-        "vegetation": {"lost_ha": _ha(veg_loss, pixel_ha), "gained_ha": _ha(veg_gain, pixel_ha)},
-        "burn": {
-            "low_ha": _ha(burn_low, pixel_ha),
-            "moderate_ha": _ha(burn_mod, pixel_ha),
-            "high_ha": _ha(burn_high, pixel_ha),
-        },
-        "water": {
-            "before_ha": _ha(w_b, pixel_ha),
-            "after_ha": _ha(w_a, pixel_ha),
-            "lost_ha": _ha(water_loss, pixel_ha),
-            "gained_ha": _ha(water_gain, pixel_ha),
-        },
+        "vegetation": veg,
+        "burn": burn,
+        "water": water,
         "thresholds": {
             "veg_min": VEG_MIN,
             "veg_delta": VEG_DELTA,
@@ -177,8 +178,8 @@ def pick_focus(stats: dict) -> str:
     """Focus with the most changed hectares; ties go vegetation, burn, water."""
     totals = {
         "vegetation": stats["vegetation"]["lost_ha"] + stats["vegetation"]["gained_ha"],
-        # low-severity dNBR is mostly seasonal/urban noise, so burn counts moderate + high only
-        "burn": stats["burn"]["moderate_ha"] + stats["burn"]["high_ha"],
+        # burned_ha is moderate + high: low-severity dNBR is mostly seasonal/urban noise
+        "burn": stats["burn"]["burned_ha"],
         "water": stats["water"]["lost_ha"] + stats["water"]["gained_ha"],
     }
     return max(totals, key=lambda k: totals[k])  # max keeps the first of equal keys

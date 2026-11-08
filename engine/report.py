@@ -32,7 +32,7 @@ def legend_for(focus: str) -> list[tuple[str, str]]:
 
 def focus_total(stats: dict, focus: str) -> float:
     if focus == "burn":
-        return stats["burn"]["moderate_ha"] + stats["burn"]["high_ha"]
+        return stats["burn"]["burned_ha"]
     if focus == "vegetation":
         return stats["vegetation"]["lost_ha"] + stats["vegetation"]["gained_ha"]
     return stats["water"]["lost_ha"] + stats["water"]["gained_ha"]
@@ -44,15 +44,14 @@ def compare_headline(stats: dict, focus: str, d1: date, d2: date) -> str:
         return f"No significant {focus} change detected {span}"
     if focus == "burn":
         b = stats["burn"]
-        total = b["moderate_ha"] + b["high_ha"]
         high = f" ({fmt_ha(b['high_ha'])} ha high severity)" if b["high_ha"] > 0 else ""
-        return f"≈ {fmt_ha(total)} ha burned{high} {span}"
+        return f"≈ {fmt_ha(b['burned_ha'])} ha burned{high} {span}"
     if focus == "vegetation":
         v = stats["vegetation"]
         return (f"≈ {fmt_ha(v['lost_ha'])} ha of vegetation lost and "
                 f"{fmt_ha(v['gained_ha'])} ha gained {span}")
     w = stats["water"]
-    delta = round(w["after_ha"] - w["before_ha"], 2)
+    delta = w["net_ha"]
     change = fmt_ha(abs(delta))
     if change in ("0.0", "0"):
         diff = "no net change"

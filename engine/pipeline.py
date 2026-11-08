@@ -97,7 +97,8 @@ class _Area:
 
 
 def _place(aoi: AOI) -> dict:
-    return {"name": aoi.name, "bbox": list(aoi.bbox), "area_km2": aoi.area_km2, "source": aoi.source}
+    return {"name": aoi.name, "full_name": aoi.full_name or aoi.name, "bbox": list(aoi.bbox),
+            "area_km2": aoi.area_km2, "source": aoi.source}
 
 
 def _mean_cloud(scenes: list[Scene]) -> float:
@@ -106,6 +107,14 @@ def _mean_cloud(scenes: list[Scene]) -> float:
 
 def _lowest_cloud(groups: dict[str, list[Scene]], n: int) -> list[str]:
     return sorted(groups, key=lambda d: (_mean_cloud(groups[d]), d))[:n]
+
+
+def _nearest_first(groups: dict[str, list[Scene]], target: date, n: int) -> list[str]:
+    """Dates nearest the target first; dates over 30 % cloud (scene metadata) go last."""
+    def key(d):
+        cloud = _mean_cloud(groups[d])
+        return (cloud > 30, abs((date.fromisoformat(d) - target).days), cloud, d)
+    return sorted(groups, key=key)[:n]
 
 
 def _clear_by_date(area: _Area, groups, dates, reader, cache_dir, pool=None,
@@ -122,9 +131,12 @@ def _clear_by_date(area: _Area, groups, dates, reader, cache_dir, pool=None,
     return dict(zip(dates, results))
 
 
-def _rank_clearest(area: _Area, groups, limit, reader, cache_dir, pool=None, batch=2, glint=False):
-    """Evaluate the lowest-cloud dates in small batches; stop once one is nearly cloud-free."""
-    order = _lowest_cloud(groups, limit)
+def _rank_clearest(area: _Area, groups, limit, reader, cache_dir, pool=None, batch=2, glint=False,
+                   target: date | None = None):
+    """Evaluate candidate dates in small batches; stop once one is nearly cloud-free.
+
+    Candidates come nearest the target first when there is one, lowest cloud first otherwise."""
+    order = _nearest_first(groups, target, limit) if target else _lowest_cloud(groups, limit)
     out: dict = {}
     for i in range(0, len(order), batch):
         out.update(_clear_by_date(area, groups, order[i:i + batch], reader, cache_dir, pool, glint))
@@ -205,9 +217,13 @@ def _rank_side(area: _Area, target: date, side: str, window: int, cache_dir, sea
     groups = group_by_date(scenes)
     if not groups:
         _fail(area, target, side, cache_dir, search, reader, pool)
-    clear = _rank_clearest(area, groups, 6, reader, cache_dir, pool)
+    clear = _rank_clearest(area, groups, 6, reader, cache_dir, pool, target=target)
     gap = {d: abs((date.fromisoformat(d) - target).days) for d in clear}
-    ranked = sorted(clear, key=lambda d: (-clear[d][0], gap[d]))
+
+    def rank(d):  # the nearest nearly cloud-free date; failing that, the clearest
+        c = clear[d][0]
+        return (0, gap[d], -c) if c >= STOP_CLEAR else (1, -c, gap[d])
+    ranked = sorted(clear, key=rank)
     best = ranked[0]
     use = [best]
     est = clear[best][0]

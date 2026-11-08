@@ -23,7 +23,6 @@ UA = "overhead-hermes-plugin/0.1.0 (+https://github.com/leoresendedop-sys/overhe
 def _result(name, importance, lat=10.0, lon=20.0, country="Testland", **extra):
     d = 0.05
     return {
-        **extra,
         "display_name": f"{name}, {country}",
         "name": name,
         "lat": str(lat),
@@ -32,6 +31,7 @@ def _result(name, importance, lat=10.0, lon=20.0, country="Testland", **extra):
         "boundingbox": [str(lat - d), str(lat + d), str(lon - d), str(lon + d)],
         "geojson": {"type": "Point", "coordinates": [lon, lat]},
         "address": {"country": country},
+        **extra,
     }
 
 
@@ -117,13 +117,39 @@ def test_geocode_keeps_a_postcode_when_nothing_else_matched(tmp_cache):
 def test_geocode_collapses_the_same_place(tmp_cache):
     # Nominatim's real answer for "Altadena, California": the CDP polygon, the same town as a
     # point (91001), and a San Diego neighbourhood. Equal importance for the first two.
-    a = _geocode([_result("Altadena, Los Angeles County", 0.5186, 34.1928, -118.1375,
-                          addresstype="census"),
-                  _result("Altadena, Los Angeles County, 91001", 0.5186, 34.1899, -118.1317,
-                          addresstype="town"),
-                  _result("Altadena, North Park, San Diego", 0.1334, 32.7393, -117.1226,
-                          addresstype="quarter")], tmp_cache)
-    assert a.name == "Altadena, Los Angeles County, Testland"
+    us = {"state": "California", "country": "United States"}
+    full = "Altadena, Los Angeles County, California, United States"
+    a = _geocode([_result("Altadena", 0.5186, 34.1928, -118.1375, addresstype="census",
+                          display_name=full, address=us),
+                  _result("Altadena", 0.5186, 34.1899, -118.1317, addresstype="town",
+                          display_name=full.replace("United", "91001, United"), address=us),
+                  _result("Altadena", 0.1334, 32.7393, -117.1226, addresstype="quarter",
+                          address=us)], tmp_cache)
+    assert a.name == "Altadena, California" and a.full_name == full
+
+
+@pytest.mark.parametrize("extra,expected", [
+    ({"address": {"state": "Amazonas", "region": "North", "country": "Brazil"}}, "Manaus, Amazonas"),
+    ({"address": {"region": "Île-de-France", "country": "France"}}, "Manaus, Île-de-France"),
+    ({"address": {"country": "Brazil"}}, "Manaus, Brazil"),
+    ({"address": {"state": "Manaus", "country": "Brazil"}}, "Manaus, Brazil"),  # region == name
+    ({"name": "", "display_name": "Manaus, Região Norte, Brasil", "address": {"country": "Brasil"}},
+     "Manaus, Brasil"),
+])
+def test_geocode_short_name(tmp_cache, extra, expected):
+    a = _geocode([{**_result("Manaus", 0.7), **extra}], tmp_cache)
+    assert a.name == expected and a.source == "nominatim"
+    assert a.full_name == extra.get("display_name", "Manaus, Testland")
+
+
+def test_ambiguous_candidates_use_short_names(tmp_cache):
+    with pytest.raises(AmbiguousPlace) as ei:
+        _geocode([_result("Springfield", 0.61, 39.8, -89.6,
+                          address={"state": "Illinois", "country": "United States"}),
+                  _result("Springfield", 0.60, 37.2, -93.3,
+                          address={"state": "Missouri", "country": "United States"})], tmp_cache)
+    names = [c["name"] for c in ei.value.extra["candidates"]]
+    assert names == ["Springfield, Illinois", "Springfield, Missouri"]
 
 
 def test_geocode_not_found(tmp_cache):

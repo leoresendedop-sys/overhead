@@ -31,6 +31,7 @@ class AOI:
     bbox: tuple[float, float, float, float]
     area_km2: float
     source: str
+    full_name: str | None = None  # the geocoder's long name, when there is one
 
 
 def _rings(geometry: dict):
@@ -80,8 +81,8 @@ def _bbox_polygon(minx, miny, maxx, maxy) -> dict:
     }
 
 
-def _make(name: str, geometry: dict, source: str) -> AOI:
-    return AOI(name, geometry, _bbox(geometry), round(area_km2(geometry), 1), source)
+def _make(name: str, geometry: dict, source: str, full_name: str | None = None) -> AOI:
+    return AOI(name, geometry, _bbox(geometry), round(area_km2(geometry), 1), source, full_name)
 
 
 def aoi_from_point(lat: float, lon: float, radius_km: float, name: str | None = None) -> AOI:
@@ -167,6 +168,16 @@ def _country(result: dict) -> str:
     return c or result.get("display_name", "").rsplit(",", 1)[-1].strip()
 
 
+def _short_name(result: dict, fallback: str) -> str:
+    """Short title: the name plus its state, region or country, e.g. Altadena, California."""
+    display = str(result.get("display_name") or "")
+    name = str(result.get("name") or display.split(",")[0]).strip() or fallback
+    address = result.get("address") or {}
+    region = next((str(address[k]).strip() for k in ("state", "region", "country")
+                   if address.get(k) and str(address[k]).strip() != name), "")
+    return f"{name}, {region}" if region else name
+
+
 def _is_postcode(result: dict) -> bool:
     return "postcode" in (result.get("addresstype"), result.get("type"))
 
@@ -202,7 +213,7 @@ def geocode(query: str, cache_dir: Path, *, fetch=get_json, sleep=time.sleep) ->
             g = _geometry_of(r)
             cands.append(
                 {
-                    "name": r.get("display_name", r.get("name", "")),
+                    "name": _short_name(r, query),
                     "country": _country(r),
                     "lat": float(r["lat"]),
                     "lon": float(r["lon"]),
@@ -212,7 +223,8 @@ def geocode(query: str, cache_dir: Path, *, fetch=get_json, sleep=time.sleep) ->
         raise AmbiguousPlace(
             f"'{query}' matches several places. Pick one or pass lat/lon.", candidates=cands
         )
-    return _make(top.get("display_name", query), _geometry_of(top), "nominatim")
+    return _make(_short_name(top, query), _geometry_of(top), "nominatim",
+                 top.get("display_name") or None)
 
 
 def resolve_aoi(args: dict, cache_dir: Path) -> AOI:

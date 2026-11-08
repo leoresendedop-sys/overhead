@@ -60,7 +60,7 @@ def test_vegetation_loss_counts():
     for k in ("red", "nir"):
         after[k][0, :5] = {"red": 3500, "nir": 6500}[k]
     s = change_stats(before, after, full_aoi(), PIXEL_HA)
-    assert s["vegetation"] == {"lost_ha": 0.05, "gained_ha": 0.0}
+    assert s["vegetation"] == {"lost_ha": 0.05, "gained_ha": 0.0, "net_ha": -0.05}
     assert s["masks"]["veg_loss"].sum() == 5
     assert s["masks"]["veg_gain"].sum() == 0
 
@@ -72,7 +72,21 @@ def test_burn_classes():
         after["nir"][0, col] = int(round(5000 * (1 + nbr_after)))
         after["swir22"][0, col] = int(round(5000 * (1 - nbr_after)))
     s = change_stats(before, after, full_aoi(), PIXEL_HA)
-    assert s["burn"] == {"low_ha": 0.01, "moderate_ha": 0.01, "high_ha": 0.01}
+    assert s["burn"] == {"low_ha": 0.01, "moderate_ha": 0.01, "high_ha": 0.01, "burned_ha": 0.02}
+
+
+def test_ready_made_totals():
+    """burned_ha = moderate + high (low is not burned); net = gained - lost and after - before."""
+    before, after = stack(swir22=1000), stack(swir22=1000)
+    for col, nbr_after in enumerate((0.6, 0.4, 0.0, 0.0)):  # low, moderate, high, high
+        after["nir"][0, col] = int(round(5000 * (1 + nbr_after)))
+        after["swir22"][0, col] = int(round(5000 * (1 - nbr_after)))
+    after["red"][1, :3] = 3500  # vegetation lost on 3 more pixels
+    s = change_stats(before, after, full_aoi(), 0.1)
+    b, v, w = s["burn"], s["vegetation"], s["water"]
+    assert (b["low_ha"], b["moderate_ha"], b["high_ha"], b["burned_ha"]) == (0.1, 0.1, 0.2, 0.3)
+    assert v["net_ha"] == round(v["gained_ha"] - v["lost_ha"], 2) and v["net_ha"] < 0
+    assert w["net_ha"] == round(w["after_ha"] - w["before_ha"], 2)
 
 
 def test_water_gain():
@@ -85,6 +99,7 @@ def test_water_gain():
     assert s["water"]["lost_ha"] == 0.0
     assert s["water"]["after_ha"] == 0.03
     assert s["water"]["before_ha"] == 0.0
+    assert s["water"]["net_ha"] == 0.03
     assert abs(float(mndwi(np.array([0.4]), np.array([0.6]))[0]) + 0.2) < 1e-6
 
 
@@ -108,9 +123,10 @@ def test_change_stats_all_invalid():
         empty = change_stats(stack(), stack(), np.zeros((10, 10), bool), PIXEL_HA)
     assert s["valid_fraction"] == 0.0
     assert s["confidence"] == "low"
-    assert s["vegetation"] == {"lost_ha": 0.0, "gained_ha": 0.0}
-    assert s["burn"] == {"low_ha": 0.0, "moderate_ha": 0.0, "high_ha": 0.0}
-    assert s["water"] == {"before_ha": 0.0, "after_ha": 0.0, "lost_ha": 0.0, "gained_ha": 0.0}
+    assert s["vegetation"] == {"lost_ha": 0.0, "gained_ha": 0.0, "net_ha": 0.0}
+    assert s["burn"] == {"low_ha": 0.0, "moderate_ha": 0.0, "high_ha": 0.0, "burned_ha": 0.0}
+    assert s["water"] == {"before_ha": 0.0, "after_ha": 0.0, "lost_ha": 0.0, "gained_ha": 0.0,
+                          "net_ha": 0.0}
     assert empty["valid_fraction"] == 0.0
     assert all(not m.any() for m in s["masks"].values())
 
@@ -140,15 +156,15 @@ def test_composite_median_skips_clouds():
 def test_pick_focus():
     stats = {
         "vegetation": {"lost_ha": 20.0, "gained_ha": 10.0},
-        "burn": {"low_ha": 100.0, "moderate_ha": 35.0, "high_ha": 5.0},
+        "burn": {"low_ha": 100.0, "moderate_ha": 35.0, "high_ha": 5.0, "burned_ha": 40.0},
         "water": {"lost_ha": 1.0, "gained_ha": 0.0},
     }
     assert pick_focus(stats) == "burn"
-    noisy = {**stats, "burn": {"low_ha": 900.0, "moderate_ha": 2.0, "high_ha": 1.0}}
+    noisy = {**stats, "burn": {"low_ha": 900.0, "moderate_ha": 2.0, "high_ha": 1.0, "burned_ha": 3.0}}
     assert pick_focus(noisy) == "vegetation"  # low-severity dNBR is noise, not counted
     tie = {
         "vegetation": {"lost_ha": 5.0, "gained_ha": 5.0},
-        "burn": {"low_ha": 0.0, "moderate_ha": 10.0, "high_ha": 0.0},
+        "burn": {"low_ha": 0.0, "moderate_ha": 10.0, "high_ha": 0.0, "burned_ha": 10.0},
         "water": {"lost_ha": 10.0, "gained_ha": 0.0},
     }
     assert pick_focus(tie) == "vegetation"
