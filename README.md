@@ -36,8 +36,8 @@ hermes gateway restart
 3. **Restart** Hermes so the tools and the Desktop backend route load.
 4. **Desktop card (optional).** In Hermes Desktop, go to **Capabilities → Plugins → Rescan**, then
    switch on Overhead's **Desktop** half. The card needs a current Desktop build that has the
-   tool-media renderer area: Hermes `main` (canary) or the first release after v2026.9.24
-   (0.22.5). Older builds still show the panel PNG and the GIF.
+   tool-media renderer area: a Desktop build from `main` after 24 Oct 2026 (canary), or the
+   first release after 0.22.5. Older builds still show the panel PNG and the GIF.
 
 Requires Hermes 0.22.5 or later. Once the catalog entry is merged, `hermes plugins install
 overhead` works too.
@@ -68,13 +68,14 @@ Times are from one Apple-silicon Mac on home broadband.
 ![Before, after and vegetation change panel near Novo Progresso, Pará, Brazil](assets/novo-progresso-vegetation.jpg)
 
 *Novo Progresso, Pará, Brazil, 31 Jul 2019 → 29 Jul 2025: ≈ 3,718 ha of vegetation lost (red)
-and 243 ha gained (green). The test run labelled it "Novo Progresso, Brazil".*
+and 243 ha gained (green).*
 
 ![Monthly timelapse of the Rio Negro at Manaus, July to November 2024](assets/manaus-water.gif)
 
 ![Water area per month at Manaus, June to December 2024](assets/manaus-water-chart.png)
 
-*Rio Negro at Manaus, 2024. June and December had no clear image and are left out. The hollow
+*Rio Negro at Manaus, 2024. June and December had no image at least 60% clear (the best were 57%
+and 55%), so they are left out. The hollow
 October point is affected by sun glint: the result flags it, and the headline leaves it out.*
 
 More ideas:
@@ -88,7 +89,9 @@ More ideas:
 Every tool takes a place in one of three ways: `place` (a name, looked up on OpenStreetMap);
 `lat` + `lon` + `radius_km` (a square, half-side 5 km by default, at most 100); or `geojson` (a
 Polygon, MultiPolygon, Feature or FeatureCollection). With coordinates or GeoJSON, `place` is only
-the title. Dates are `YYYY-MM-DD` or `YYYY-MM` (a month means its 15th), from 2017-03-28 to today.
+the title. Dates are `YYYY-MM-DD` or `YYYY-MM`, from 2017-03-28 to today. A month means the whole
+month as the `start` or `end` of a range (scenes, timelapse), and its 15th as a compare's `before` or
+`after`.
 
 | Tool | What it does | Key arguments | Returns |
 |---|---|---|---|
@@ -102,13 +105,14 @@ after, or the first and last frames), so it can describe what it sees.
 
 Errors never raise. They come back as `{"error": {"type": ..., "message": ...}}`, with a message
 that says what to do next: `bad_input`, `place_not_found`, `ambiguous_place` (up to 5 candidates),
-`area_too_large`, `no_clear_scene` (with the nearest clear dates), `network` or `internal`.
+`area_too_large`, `no_clear_scene` (from a compare, with the nearest clear dates), `network` or
+`internal`.
 
-**Hooks: `post_tool_call` and `transform_llm_output`.** Hermes delivers an image only when the reply
-carries its `MEDIA:<path>` line on a line of its own. `post_tool_call` records the panel or GIF
-that each compare or timelapse produced in the turn. `transform_llm_output` appends the line for any
-file the reply does not deliver, including one the model forgot or wrapped in code or quotes. The
-image arrives every time.
+**Hooks: `post_tool_call` and `transform_llm_output`.** Hermes delivers an image reliably when the
+reply carries its `MEDIA:<path>` line on a line of its own. `post_tool_call` records the panel or
+GIF that each compare or timelapse produced in the turn. `transform_llm_output` appends that line
+for any file the reply does not already carry that way, so the image arrives even when the model
+forgets the line or wraps it in code or quotes.
 
 **Skill: `overhead:earth-watch`.** It tells the model which tool fits the question, how to turn
 "January 2025" into dates, to report the headline and stats exactly as given, to state the
@@ -136,16 +140,18 @@ anything fails. The card is built from `src/` into `desktop/plugin.js` and impor
    cloud-optimised GeoTIFFs on [AWS Open Data](https://registry.opendata.aws/sentinel-2-l2a-cogs/)
    with HTTP range requests, so only the pixels over the area are downloaded.
 3. **Clouds.** The scene classification layer (SCL) masks nodata, defective pixels, cloud shadow,
-   cloud and cirrus. For each requested date Overhead takes the clearest scene within
-   ±`window_days`, preferring the closest one. If no single scene is at least 80% clear over the
-   area, it builds a per-pixel median composite of up to 3 scenes.
+   cloud and cirrus. For each requested date Overhead checks the six image dates nearest to it
+   within ±`window_days` (dates over 30% cloudy in the scene metadata go last). It takes the
+   nearest one that is at least 95% clear over the area, or failing that the clearest of them. If
+   that one is under 80% clear, it builds a per-pixel median composite of the three best.
 4. **Change.** Only pixels inside the area and clear on both dates count. Each class is a pixel
    count times the pixel area.
    - **Vegetation (NDVI).** Loss is NDVI_before ≥ 0.5 and ΔNDVI ≤ −0.25. Gain is the mirror:
      NDVI_after ≥ 0.5 and ΔNDVI ≥ +0.25.
    - **Burn severity (dNBR = NBR_before − NBR_after).** Classes follow Key & Benson: low 0.10–0.27,
-     moderate 0.27–0.66, high ≥ 0.66. "Burned" counts moderate and high. Low severity is reported
-     on its own (`burn.low_ha`), because it is often seasonal or urban noise.
+     moderate 0.27–0.66, high ≥ 0.66 ("moderate" merges their moderate-low and moderate-high
+     classes). "Burned" counts moderate and high. Low severity is reported on its own
+     (`burn.low_ha`), because it is often seasonal or urban noise.
    - **Water (MNDWI).** Water is MNDWI > 0, or a pixel the SCL classifies as water. Sun glint and
      smoke haze over water are detected (SWIR reflectance over SCL water above 0.10). The
      timelapse avoids those dates when it can, and both tools flag the ones they use.
@@ -157,7 +163,7 @@ anything fails. The card is built from `src/` into `desktop/plugin.js` and impor
 **Numbers are computed, not guessed.** Each result carries a one-line `headline` and ready-made
 totals (`burn.burned_ha`, `vegetation.net_ha`, `water.net_ha`). The tool descriptions and the skill
 tell the model to report them as given and never to add, subtract or recompute them. Each run's
-`result.json` also records the thresholds and the STAC items it used.
+`result.json` records the STAC items it used, and a compare's also records its thresholds.
 
 References:
 
@@ -175,8 +181,9 @@ References:
 - **10 m pixels.** Cars, cattle and single trees are invisible; a house is a few pixels. Large
   areas are coarser (see above).
 - **Seasonal cloud.** The Amazon wet season (December to May) and the monsoon can leave no clear
-  image for weeks. Overhead then returns `no_clear_scene` with the nearest clear dates rather than
-  a wrong answer. Use `overhead_scenes` or a wider `window_days`.
+  image for weeks. A compare then returns `no_clear_scene` with the nearest clear dates rather
+  than a wrong answer, and a timelapse leaves those periods out. Use `overhead_scenes` or a wider
+  `window_days`.
 - **NDVI is seasonal.** Summer against winter looks like vegetation loss. Compare the same season
   across years, for example July 2019 with July 2025.
 - **dNBR is built for vegetation.** It under-detects burned buildings in dense urban areas: in the
@@ -184,21 +191,25 @@ References:
   harvest, land clearing or snowmelt between the two dates can also look like a burn.
 - **Glint and haze over water.** Sunlight reflecting off water, or smoke, can hide it. Those dates
   are flagged, and the water area on them is likely an underestimate (October 2024 at Manaus).
-- **First run of a new area: about 30 to 70 s.** The imagery streams from AWS us-west-2. Repeat
-  runs take about 1 s from the cache.
-- **Data starts on 2017-03-28,** when Sentinel-2 L2A coverage begins. Future dates are refused.
-- **The cache is not pruned.** Image chunks pile up in the plugin's `cache/` folder (about 1 GB
-  after building the three demo scenes). Delete it whenever you like; it is rebuilt on demand.
+- **First run of a new area: about 40 to 70 s, sometimes longer.** The imagery streams from AWS
+  us-west-2. Repeat runs take about 1 s from the cache.
+- **Coverage.** Sentinel-2 images land and coastal waters from about 56° S to 84° N. The open
+  ocean and the far south have little or no imagery.
+- **Dates.** The tools accept dates from 2017-03-28 to today.
+- **The cache is not pruned.** Image chunks pile up in the plugin's `cache/` folder: a few hundred
+  MB for the three demo scenes, and large areas add more. Delete it whenever you like; it is
+  rebuilt on demand.
 
 ## Disclosure
 
 Overhead makes these network calls and no others:
 
 - **Earth Search STAC API by Element 84**, `https://earth-search.aws.element84.com/v1`: searches
-  for `sentinel-2-l2a` scenes by the area's bounding box and the date range. Answers are cached.
+  for `sentinel-2-l2a` scenes by the area's bounding box (never its exact outline) and the date
+  range, with the User-Agent below. Answers are cached when the range ends before today.
 - **Sentinel-2 COGs on AWS Open Data**, the `sentinel-cogs` bucket in `us-west-2`
   (`https://sentinel-cogs.s3.us-west-2.amazonaws.com/...`): unsigned HTTPS range reads of the image
-  bands. Cached.
+  bands, without credentials (`~/.netrc` is never read). The pixels read are cached.
 - **Nominatim / OpenStreetMap**, `https://nominatim.openstreetmap.org/search`: only when you give a
   place name. It sends the name with the User-Agent
   `overhead-hermes-plugin/0.1.0 (+https://github.com/leoresendedop-sys/overhead)`, at most 1
@@ -206,9 +217,9 @@ Overhead makes these network calls and no others:
 - **Optional:** the Desktop card's **Open map** button opens `https://www.openstreetmap.org/` at the
   area's bounding box in your browser, and only when you click it.
 
-Nothing else is sent anywhere. There are no API keys, no accounts and no telemetry. Your
-conversation never leaves Hermes; these services see only the area, the dates and, for a name
-lookup, the place name.
+Nothing else is sent anywhere. There are no API keys, no accounts and no telemetry. Overhead
+sends nothing from your conversation: these services see only the area's bounding box, the dates
+and, for a name lookup, the place name.
 
 On disk, Overhead writes only to Hermes's plugin data folder, `<HERMES_HOME>/plugin-data/overhead/`
 (`~/.hermes/plugin-data/overhead/` by default). `cache/` holds the STAC answers, geocodes and image

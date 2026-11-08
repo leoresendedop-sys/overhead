@@ -14,6 +14,10 @@ Cold times are network-bound, not code-bound (spec targets: 30 s for a compare, 
 Timings below are from one Apple-silicon Mac on home broadband. The live tests print the same
 numbers with `-s`.
 
+Re-run on 8 Nov 2026, after the STAC search switched from the area's polygon to its bounding box
+and range months started covering the whole month: the same dates and headlines for all three
+scenes, warm 0.3 s, 0.6 s and 1.3 s. The cold times below are from the first measurement.
+
 ## 1. Eaton fire, Altadena, California (burn)
 
 **Prompt**
@@ -66,8 +70,9 @@ gives the town and the cleared pasture around it. The label keeps its accent: pa
 **Expected call:** `overhead_timelapse`
 `{"place": "Manaus, Brazil", "lat": -3.1, "lon": -60.2, "radius_km": 15, "start": "2024-06", "end": "2024-12", "step": "month", "metric": "water"}`
 
-**Frames used:** 8 Jul, 7 Aug, 1 Sep, 11 Oct and 30 Nov 2024 (June and December have no clear image
-and are left out). Resolution 20 m.
+**Frames used:** 8 Jul, 7 Aug, 1 Sep, 11 Oct and 30 Nov 2024. Resolution 20 m. `start` and `end`
+months cover the whole month, but the best June date is 57% clear (13 Jun) and the best December
+date 55% (5 Dec), under the timelapse's 60% bar, so those two periods are left out.
 **Headline:** water area ranged from 14,342 ha (Nov 2024) to 22,165 ha (Jul 2024) over 7 months. The October point (7,493 ha) is sun-glint affected, so the headline skips it; the chart draws it as a hollow marker and the notes say it is likely underestimated.
 **Files:** `timelapse.gif`, `chart.png`, `frames/000.jpg` ... `frames/004.jpg`.
 **Timing:** cold 55 s, warm 1.3 s.
