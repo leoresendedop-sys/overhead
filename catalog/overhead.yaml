@@ -1,18 +1,18 @@
 name: overhead
 title: Overhead
 repo: https://github.com/leoresendedop-sys/overhead
-sha: "31b9fa1d5e4b0db298bd215ede238873a5d6a919"
+sha: "2074a15247ab7a763e21a29eee721fc4e5600d75"
 description: "What changed at this place between these dates? Measures vegetation loss and gain, burned area by severity (dNBR) and water change in hectares anywhere on Earth from free Sentinel-2 L2A imagery, and delivers a before | after | change panel or a timelapse GIF to every surface, with an interactive before/after swipe and timelapse card in Hermes Desktop. Provides the overhead_locate, overhead_scenes, overhead_compare and overhead_timelapse tools, the overhead:earth-watch skill, and post_tool_call / transform_llm_output hooks that append the image's MEDIA line when a reply lacks it. Disclosure — Makes unauthenticated HTTPS requests to the Earth Search STAC API by Element 84 (earth-search.aws.element84.com: scene searches by the area's bounding box, never its exact outline, and dates) and to the AWS Open Data sentinel-cogs bucket in us-west-2 (range reads of Sentinel-2 bands, with ~/.netrc never read), and, only to look up a place name, to Nominatim / OpenStreetMap (nominatim.openstreetmap.org, at most 1 request per second). STAC and Nominatim requests carry the User-Agent `overhead-hermes-plugin/0.1.0 (+https://github.com/leoresendedop-sys/overhead)`. Place lookups, the pixels read and searches over past date ranges are cached under the plugin's data folder (plugin-data/overhead: cache/ and runs/), which is not pruned automatically. The Desktop card's Open map button opens openstreetmap.org in the browser, only when clicked. Reads a system font to draw panel labels. No API keys, accounts, uploads or telemetry; rasterio installs only after Hermes dependency consent."
 maintainer: leoresendedop-sys
 tier: community
 category: tools
 requires_hermes: ">=0.22.5"
-docs_url: https://github.com/leoresendedop-sys/overhead/blob/31b9fa1d5e4b0db298bd215ede238873a5d6a919/README.md
+docs_url: https://github.com/leoresendedop-sys/overhead/blob/2074a15247ab7a763e21a29eee721fc4e5600d75/README.md
 version: "0.1.0"
 screenshots:
-  - https://raw.githubusercontent.com/leoresendedop-sys/overhead/31b9fa1d5e4b0db298bd215ede238873a5d6a919/assets/altadena-burn.jpg
-  - https://raw.githubusercontent.com/leoresendedop-sys/overhead/31b9fa1d5e4b0db298bd215ede238873a5d6a919/assets/novo-progresso-vegetation.jpg
-  - https://raw.githubusercontent.com/leoresendedop-sys/overhead/31b9fa1d5e4b0db298bd215ede238873a5d6a919/assets/manaus-water.gif
+  - https://raw.githubusercontent.com/leoresendedop-sys/overhead/2074a15247ab7a763e21a29eee721fc4e5600d75/assets/altadena-burn.jpg
+  - https://raw.githubusercontent.com/leoresendedop-sys/overhead/2074a15247ab7a763e21a29eee721fc4e5600d75/assets/novo-progresso-vegetation.jpg
+  - https://raw.githubusercontent.com/leoresendedop-sys/overhead/2074a15247ab7a763e21a29eee721fc4e5600d75/assets/manaus-water.gif
 platforms: []
 known_issues:
   - "The first run over a new area takes about 40 to 70 s, sometimes longer, while the imagery streams from AWS us-west-2; repeat runs take about 1 s from the cache."
