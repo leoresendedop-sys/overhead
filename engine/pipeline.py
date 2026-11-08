@@ -305,8 +305,7 @@ def run_compare(aoi: AOI, before: date, after: date, focus: str, window_days: in
     _save_jpeg(img_a, Path(files["after"]))
     overlay(Image.new("RGBA", img_a.size, (0, 0, 0, 0)), masks, focus).save(files["overlay"], "PNG")
     pct = round(stats["valid_fraction"] * 100)
-    # the bundled panel font has no "≈" or minus glyph
-    lines = [headline.replace("≈ ", "~").replace("\u2212", "-"),
+    lines = [headline,
              f"Sentinel-2 · {area.res} m · {pct}% clear pixels · confidence {stats['confidence']}"]
     if side_notes:
         lines.append(" ".join(side_notes))
@@ -382,6 +381,33 @@ def _label(period: str, step: str) -> str:
     return period
 
 
+def timelapse_headline(series: list[dict], metric: str, step: str, n_periods: int) -> str:
+    """One-sentence summary. Glint-flagged points are left out of the extremes when at least two
+    clean points remain; otherwise all points are used and the caveat is appended."""
+    vals = [s for s in series if s["value"] is not None]
+    unit = f"{step}{'' if n_periods == 1 else 's'}"
+    if len(vals) < 2:
+        return f"Only one clear image found over {n_periods} {unit}."
+    clean = [s for s in vals if not s.get("flag")]
+    caveat = ""
+    if len(clean) >= 2:
+        vals = clean
+    elif len(clean) < len(vals):
+        caveat = " (some dates affected by sun glint or haze)"
+    if metric == "burn":
+        hi = max(vals, key=lambda s: s["value"])
+        if hi["value"] > 0:
+            return (f"Burned area reached {fmt_ha(hi['value'])} ha ({_label(hi['period'], step)}) "
+                    f"over {n_periods} {unit}.{caveat}")
+        return f"No burned area detected over {n_periods} {unit}.{caveat}"
+    lo = min(vals, key=lambda s: s["value"])
+    hi = max(vals, key=lambda s: s["value"])
+    fmt = (lambda v: f"{fmt_ha(v)} ha") if metric == "water" else (lambda v: f"{v:.3f}")
+    name = "Water area" if metric == "water" else "Mean NDVI"
+    return (f"{name} ranged from {fmt(lo['value'])} ({_label(lo['period'], step)}) to "
+            f"{fmt(hi['value'])} ({_label(hi['period'], step)}) over {n_periods} {unit}.{caveat}")
+
+
 def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cache_dir: Path,
                   store: RunStore, *, search=search_scenes, reader=read_date_stack) -> dict:
     if end <= start:
@@ -449,25 +475,11 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
         frame_paths.append(str(fp.resolve()))
     gif, chart = rdir / "timelapse.gif", rdir / "chart.png"
     save_gif(frames, gif, 700)
-    series_chart([(s["period"], s["value"]) for s in series], metric_label, chart)
+    series_chart([(s["period"], s["value"]) for s in series], metric_label, chart,
+                 flags=[bool(s.get("flag")) for s in series])
 
-    vals = [s for s in series if s["value"] is not None]
     gaps = sum(1 for s in series if s["date"] is None)
-    unit = f"{step}{'' if len(periods) == 1 else 's'}"
-    if len(vals) < 2:
-        headline = f"Only one clear image found over {len(periods)} {unit}."
-    elif metric == "burn":
-        hi = max(vals, key=lambda s: s["value"])
-        headline = (f"Burned area reached {fmt_ha(hi['value'])} ha ({_label(hi['period'], step)}) "
-                    f"over {len(periods)} {unit}." if hi["value"] > 0
-                    else f"No burned area detected over {len(periods)} {unit}.")
-    else:
-        lo = min(vals, key=lambda s: s["value"])
-        hi = max(vals, key=lambda s: s["value"])
-        fmt = (lambda v: f"{fmt_ha(v)} ha") if metric == "water" else (lambda v: f"{v:.3f}")
-        name = "Water area" if metric == "water" else "Mean NDVI"
-        headline = (f"{name} ranged from {fmt(lo['value'])} ({_label(lo['period'], step)}) to "
-                    f"{fmt(hi['value'])} ({_label(hi['period'], step)}) over {len(periods)} {unit}.")
+    headline = timelapse_headline(series, metric, step, len(periods))
     notes = [f"Resolution {area.res} m: objects smaller than ~{2 * area.res} m are not visible."]
     if area.res > 10:
         notes.append(f"Large area: analysed at {area.res} m; small changes may be missed.")

@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(os.environ.get("OVERHEAD_LIVE") != "1",
 # The exact tool arguments of each demo scene (see demo/places.md for why these were chosen).
 ALTADENA = {"place": "Altadena, California", "lat": 34.2, "lon": -118.11, "radius_km": 6,
             "before": "2024-12-15", "after": "2025-02-15", "focus": "auto"}
-NOVO_PROGRESSO = {"place": "Novo Progresso, Brazil", "lat": -7.05, "lon": -55.40, "radius_km": 10,
+NOVO_PROGRESSO = {"place": "Novo Progresso, Pará", "lat": -7.05, "lon": -55.40, "radius_km": 10,
                   "before": "2019-08-01", "after": "2025-08-01", "focus": "vegetation"}
 MANAUS = {"place": "Manaus, Brazil", "lat": -3.1, "lon": -60.2, "radius_km": 15,
           "start": "2024-06", "end": "2024-12", "step": "month", "metric": "water"}

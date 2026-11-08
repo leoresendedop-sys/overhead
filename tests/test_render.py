@@ -106,3 +106,34 @@ def test_preview_data_url_prefix():
     assert url.startswith("data:image/jpeg;base64,")
     out = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
     assert max(out.size) <= 768
+
+
+def _px(path):
+    return np.asarray(Image.open(path).convert("RGB"))
+
+
+def test_fold_text_for_the_ascii_fallback():
+    from engine import render
+    assert render.fold_text("São Paulo, Pará ≈ −5") == "Sao Paulo, Para ~ -5"
+    assert render.fold_text("Zürich · 10 m") == "Zurich · 10 m"
+
+
+def test_panel_and_labels_render_accents_under_both_fonts(monkeypatch):
+    from engine import render
+    img = Image.new("RGB", (60, 40), (90, 90, 90))
+    for forced in (None, False):  # the real font, then the forced ASCII fallback
+        if forced is False:
+            monkeypatch.setattr(render, "_font_path", lambda: None)
+        out = panel(img, img, img, "São Paulo, Pará", ["≈ 5 ha, −2 ha"], [("#ff0000", "Perda")])
+        assert out.width > 100
+        assert annotate_frame(img, "São Paulo").size == img.size
+
+
+def test_series_chart_marks_flagged_points(tmp_path):
+    pts = [("2024-07", 20.0), ("2024-08", 18.0), ("2024-09", 5.0), ("2024-10", 15.0)]
+    a, b, c = tmp_path / "a.png", tmp_path / "b.png", tmp_path / "c.png"
+    series_chart(pts, "Water (ha)", a)
+    series_chart(pts, "Water (ha)", b, flags=[False, False, True, False])
+    series_chart(pts, "Water (ha)", c, flags=[False] * 4)
+    assert (_px(a) != _px(b)).any()
+    assert (_px(a) == _px(c)).all()  # no flagged point: nothing changes, no legend entry

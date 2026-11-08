@@ -9,6 +9,8 @@ Warm the cache before recording, with the data directory Hermes uses:
 
     OVERHEAD_DATA_ROOT=<hermes plugin data dir>/overhead OVERHEAD_LIVE=1 python -m pytest tests/test_live.py -s
 
+Cold times are network-bound, not code-bound (spec targets: 30 s for a compare, 90 s for a timelapse; the cold compares above miss the first). The cache MUST be warm before recording the video: run the live tests with `OVERHEAD_DATA_ROOT` first.
+
 Timings below are from one Apple-silicon Mac on home broadband. The live tests print the same
 numbers with `-s`.
 
@@ -43,17 +45,16 @@ at the bottom of the frame, which tells the story best.
 > was lost?
 
 **Expected call:** `overhead_compare`
-`{"place": "Novo Progresso, Brazil", "lat": -7.05, "lon": -55.4, "radius_km": 10, "before": "2019-08-01", "after": "2025-08-01", "focus": "vegetation"}`
+`{"place": "Novo Progresso, Pará", "lat": -7.05, "lon": -55.4, "radius_km": 10, "before": "2019-08-01", "after": "2025-08-01", "focus": "vegetation"}`
 
 **Dates picked:** 31 Jul 2019 (98% clear) and 29 Jul 2025 (100% clear), confidence high, 10 m.
 **Headline:** about 3,718 ha of vegetation lost and 243 ha gained.
 **Files:** `panel.png`, `before.jpg`, `after.jpg`, `overlay.png`.
 **Timing:** cold 67 s (another run 56 s), warm 0.6 s.
 
-Why a point and a label without the accent: the place name resolves to the whole municipality
+Why a point: the place name resolves to the whole municipality
 (about 3.8 million ha, 175,000 ha "burned" at 80 m), which is useless as a picture. The point
-gives the town and the cleared pasture around it. The label is written "Brazil", not "Pará",
-because the panel font has no glyph for "á" (it draws an empty box in the title).
+gives the town and the cleared pasture around it. The label keeps its accent: panels now use a Unicode font (and fold to ASCII when none is installed).
 
 ## 3. Rio Negro drought at Manaus, Brazil (water timelapse)
 
@@ -67,7 +68,7 @@ because the panel font has no glyph for "á" (it draws an empty box in the title
 
 **Frames used:** 8 Jul, 7 Aug, 1 Sep, 11 Oct and 30 Nov 2024 (June and December have no clear image
 and are left out). Resolution 20 m.
-**Headline:** water area ranged from 7,493 ha (Oct 2024) to 22,165 ha (Jul 2024) over 7 months.
+**Headline:** water area ranged from 14,342 ha (Nov 2024) to 22,165 ha (Jul 2024) over 7 months. The October point (7,493 ha) is sun-glint affected, so the headline skips it; the chart draws it as a hollow marker and the notes say it is likely underestimated.
 **Files:** `timelapse.gif`, `chart.png`, `frames/000.jpg` ... `frames/004.jpg`.
 **Timing:** cold 55 s, warm 1.3 s.
 

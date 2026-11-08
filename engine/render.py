@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import io
+import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +30,53 @@ GAP = 14
 MAX_WIDTH = 1800
 
 
+FONT_CANDIDATES = (
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/Library/Fonts/Arial Unicode.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf",
+)
+_FOLD = {"≈": "~", "−": "-", "–": "-", "—": "-"}
+
+
+@lru_cache(maxsize=1)
+def _font_path() -> str | None:
+    """First installed Unicode TrueType font of the list, or None (then the built-in font is used)."""
+    for path in FONT_CANDIDATES:
+        if Path(path).is_file():
+            try:
+                ImageFont.truetype(path, 12)
+                return path
+            except OSError:
+                continue
+    return None
+
+
+def fold_text(text: str) -> str:
+    """ASCII-ish text for the built-in font: accents dropped, "≈" and "−" mapped, "·" and "…" kept."""
+    text = "".join(_FOLD.get(c, c) for c in text)
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def _t(text: str) -> str:
+    """The text as the active font can draw it."""
+    return text if _font_path() else fold_text(text)
+
+
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    path = _font_path()
+    if path:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            pass
     return ImageFont.load_default(size=size)
 
 
@@ -69,6 +117,7 @@ def overlay(base: Image.Image, masks: dict[str, np.ndarray], focus: str) -> Imag
 
 
 def _fit(draw: ImageDraw.ImageDraw, text: str, font, max_w: float) -> str:
+    text = _t(text)
     if draw.textlength(text, font=font) <= max_w:
         return text
     while text and draw.textlength(text + "…", font=font) > max_w:
@@ -142,7 +191,7 @@ def panel(
     if legend_rows:
         y += legend_rows * row_h + 10
 
-    d.text((width - PAD, height - PAD // 2 - 2), ATTRIBUTION, font=f_small, fill=MUTED, anchor="rd")
+    d.text((width - PAD, height - PAD // 2 - 2), _t(ATTRIBUTION), font=f_small, fill=MUTED, anchor="rd")
     return img
 
 
@@ -154,6 +203,7 @@ def annotate_frame(img: Image.Image, label: str) -> Image.Image:
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
     margin, pad_x, pad_y = max(8, size // 2), size * 0.7, size * 0.35
+    label = _t(label)
     tw = d.textlength(label, font=font)
     x0, y1 = margin, base.height - margin
     x1, y0 = x0 + tw + 2 * pad_x, y1 - size - 2 * pad_y
@@ -169,8 +219,10 @@ def save_gif(frames: list[Image.Image], path: Path, ms: int = 700) -> None:
 
 
 def series_chart(points: list[tuple[str, float | None]], ylabel: str, path: Path,
-                 size: tuple[int, int] = (900, 300)) -> None:
-    """Dark line chart; None values break the line (no interpolation across gaps)."""
+                 size: tuple[int, int] = (900, 300), flags: list[bool] | None = None) -> None:
+    """Dark line chart; None values break the line (no interpolation across gaps).
+
+    Flagged points (sun glint or haze) are hollow muted circles, with a small legend entry."""
     k = 3  # supersample factor for antialiasing
     w, h = size[0] * k, size[1] * k
     img = Image.new("RGB", (w, h), BG)
@@ -179,7 +231,9 @@ def series_chart(points: list[tuple[str, float | None]], ylabel: str, path: Path
     left, right, top, bottom = 62 * k, 24 * k, 40 * k, 38 * k
     x0, x1, y0, y1 = left, w - right, top, h - bottom
 
-    d.text((left, 12 * k), ylabel, font=f_label, fill=MUTED)
+    d.text((left, 12 * k), _t(ylabel), font=f_label, fill=MUTED)
+    flags = list(flags) if flags else [False] * len(points)
+    flags += [False] * (len(points) - len(flags))
     vals = [v for _, v in points if v is not None]
     n = len(points)
     if vals:
@@ -206,9 +260,9 @@ def series_chart(points: list[tuple[str, float | None]], ylabel: str, path: Path
             d.text((x0 - 8 * k, py(v)), f"{v:.2f}".rstrip("0").rstrip(".") if abs(v) < 100 else f"{v:.0f}",
                    font=f_tick, fill=MUTED, anchor="rm")
     if n:
-        d.text((x0, y1 + 10 * k), points[0][0], font=f_tick, fill=MUTED, anchor="la" if n > 1 else "ma")
+        d.text((x0, y1 + 10 * k), _t(points[0][0]), font=f_tick, fill=MUTED, anchor="la" if n > 1 else "ma")
     if n > 1:
-        d.text((x1, y1 + 10 * k), points[-1][0], font=f_tick, fill=MUTED, anchor="ra")
+        d.text((x1, y1 + 10 * k), _t(points[-1][0]), font=f_tick, fill=MUTED, anchor="ra")
 
     run: list[tuple[float, float]] = []
 
@@ -226,6 +280,15 @@ def series_chart(points: list[tuple[str, float | None]], ylabel: str, path: Path
         else:
             run.append((px(i), py(v)))
     flush()
+
+    if any(f and v is not None for f, (_, v) in zip(flags, points)):
+        for i, (_, v) in enumerate(points):
+            if flags[i] and v is not None:
+                r = 5 * k
+                d.ellipse([px(i) - r, py(v) - r, px(i) + r, py(v) + r], fill=BG, outline=MUTED, width=2 * k)
+        lx, ly, r = x1 - 90 * k, 20 * k, 5 * k
+        d.ellipse([lx - r, ly - r, lx + r, ly + r], fill=BG, outline=MUTED, width=2 * k)
+        d.text((lx + 12 * k, ly), "glint/haze", font=f_tick, fill=MUTED, anchor="lm")
 
     img.resize(size, Image.LANCZOS).save(path, "PNG")
 

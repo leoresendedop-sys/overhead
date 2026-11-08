@@ -392,3 +392,22 @@ class Clearing:
             out["scl"] = out["scl"].copy()
             out["scl"][:, int(round(grid.width * f)):] = 9
         return out
+
+
+def _series(*vals):
+    return [{"period": f"2024-{i + 7:02d}", "date": f"2024-{i + 7:02d}-10", "value": v,
+             **({"flag": "glint"} if g else {})} for i, (v, g) in enumerate(vals)]
+
+
+def test_timelapse_headline_ignores_glint_flagged_points():
+    from engine.pipeline import timelapse_headline
+    s = _series((20000.0, False), (19000.0, False), (7000.0, True), (12000.0, False))
+    h = timelapse_headline(s, "water", "month", 4)
+    assert "12,000 ha (Oct 2024)" in h and "7,000" not in h and "glint" not in h
+
+
+def test_timelapse_headline_uses_all_points_when_too_few_clean():
+    from engine.pipeline import timelapse_headline
+    s = _series((20000.0, False), (7000.0, True), (9000.0, True))
+    h = timelapse_headline(s, "water", "month", 3)
+    assert "7,000 ha" in h and h.endswith("(some dates affected by sun glint or haze)")
