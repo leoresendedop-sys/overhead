@@ -16,9 +16,10 @@ from .analysis import (
     change_stats,
     clear_fraction,
     DNBR_MOD,
+    is_glinted,
     reflectance64,
+    water_mask,
     composite_median,
-    mndwi,
     nbr,
     ndvi,
     pick_focus,
@@ -107,22 +108,27 @@ def _lowest_cloud(groups: dict[str, list[Scene]], n: int) -> list[str]:
     return sorted(groups, key=lambda d: (_mean_cloud(groups[d]), d))[:n]
 
 
-def _clear_by_date(area: _Area, groups, dates, reader, cache_dir, pool=None) -> dict[str, tuple[float, np.ndarray]]:
-    """Clear fraction (and the coarse SCL) per date; concurrent when a pool is given."""
+def _clear_by_date(area: _Area, groups, dates, reader, cache_dir, pool=None,
+                   glint=False) -> dict[str, tuple[float, np.ndarray, bool]]:
+    """(clear fraction, coarse SCL, glinted) per date; concurrent when a pool is given.
+
+    With glint=True swir16 is read too, to flag sun glint or haze over water."""
+    bands = ["scl", "swir16"] if glint else ["scl"]
+
     def one(d):
-        scl = reader(groups[d], area.cgrid, ["scl"], cache_dir)["scl"]
-        return clear_fraction(scl, area.cmask), scl
+        st = reader(groups[d], area.cgrid, bands, cache_dir)
+        return clear_fraction(st["scl"], area.cmask), st["scl"], glint and is_glinted(st, area.cmask)
     results = list(pool.map(one, dates)) if pool else [one(d) for d in dates]
     return dict(zip(dates, results))
 
 
-def _rank_clearest(area: _Area, groups, limit, reader, cache_dir, pool=None, batch=2):
+def _rank_clearest(area: _Area, groups, limit, reader, cache_dir, pool=None, batch=2, glint=False):
     """Evaluate the lowest-cloud dates in small batches; stop once one is nearly cloud-free."""
     order = _lowest_cloud(groups, limit)
     out: dict = {}
     for i in range(0, len(order), batch):
-        out.update(_clear_by_date(area, groups, order[i:i + batch], reader, cache_dir, pool))
-        if max(v[0] for v in out.values()) >= STOP_CLEAR:
+        out.update(_clear_by_date(area, groups, order[i:i + batch], reader, cache_dir, pool, glint))
+        if any(v[0] >= STOP_CLEAR and not v[2] for v in out.values()):
             break
     return out
 
@@ -267,6 +273,10 @@ def run_compare(aoi: AOI, before: date, after: date, focus: str, window_days: in
     headline = compare_headline(stats, focus, d1, d2)
     side_notes = [s["_note"] for s in sides.values() if s["_note"]]
     notes = compare_notes(area.res, stats, side_notes)
+    for s in sides.values():
+        if is_glinted(s["_stack"], area.mask):
+            notes.append(f"Sun glint or smoke haze over water on {s['date']}: "
+                         "water figures for that date are likely underestimated.")
 
     run_id, rdir = store.new("compare")
     img_b, img_a = _rgb_image(sides["before"]["_stack"]), _rgb_image(sides["after"]["_stack"])
@@ -339,15 +349,14 @@ def _metric_value(metric: str, stack: dict, area: _Area, first: dict | None = No
             return None
         with np.errstate(invalid="ignore"):
             return round(float((np.round(d[ok], 9) >= DNBR_MOD).sum()) * area.pixel_ha, 2)
-    if metric == "ndvi":
-        v = ndvi(reflectance64(stack["red"]), reflectance64(stack["nir"]))
-    else:
-        v = mndwi(reflectance64(stack["green"]), reflectance64(stack["swir16"]))
+    if metric == "water":
+        if not ok.any():
+            return None
+        return round(float(water_mask(stack, ok).sum()) * area.pixel_ha, 2)
+    v = ndvi(reflectance64(stack["red"]), reflectance64(stack["nir"]))
     ok &= np.isfinite(v)
     if not ok.any():
         return None
-    if metric == "water":
-        return round(float((v[ok] > 0).sum()) * area.pixel_ha, 2)
     return round(float(v[ok].mean()), 3)
 
 
@@ -382,24 +391,32 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
         pg = by_period[p]
         if not pg:
             return None
-        clear = _rank_clearest(area, pg, 3, reader, cache_dir, batch=1)
-        d = max(clear, key=lambda k: (clear[k][0], k))
-        return d if clear[d][0] >= MIN_CLEAR_TIMELAPSE else None
+        clear = _rank_clearest(area, pg, 3, reader, cache_dir, batch=1, glint=metric == "water")
+        ok = [k for k in clear if clear[k][0] >= MIN_CLEAR_TIMELAPSE]
+        if not ok:
+            return None
+        d = max(ok, key=lambda k: (not clear[k][2], clear[k][0], k))  # clean dates first
+        return d, round(clear[d][0], 2), clear[d][2]
 
     with ThreadPoolExecutor(WORKERS) as pool:
         chosen = list(pool.map(best_of, periods))
-        reads = {p: pool.submit(reader, by_period[p][d], area.grid, bands, cache_dir)
-                 for p, d in zip(periods, chosen) if d}
+        reads = {p: pool.submit(reader, by_period[p][c[0]], area.grid, bands, cache_dir)
+                 for p, c in zip(periods, chosen) if c}
         stacks = {p: f.result() for p, f in reads.items()}
 
-    series, frames, used, first = [], [], [], None
-    for p, d in zip(periods, chosen):
-        if not d:
-            series.append({"period": p, "date": None, "value": None})
+    series, frames, used, first, glinted = [], [], [], None, []
+    for p, c in zip(periods, chosen):
+        if not c:
+            series.append({"period": p, "date": None, "value": None, "clear": None})
             continue
+        d, frac, glint = c
         stack = stacks[p]
         first = first or stack
-        series.append({"period": p, "date": d, "value": _metric_value(metric, stack, area, first)})
+        point = {"period": p, "date": d, "value": _metric_value(metric, stack, area, first), "clear": frac}
+        if glint:
+            point["flag"] = "glint"
+            glinted.append(d)
+        series.append(point)
         frames.append(annotate_frame(_rgb_image(stack), fmt_date(date.fromisoformat(d))))
         used.extend(by_period[p][d])
     if not frames:
@@ -440,6 +457,9 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
         notes.append(f"Large area: analysed at {area.res} m; small changes may be missed.")
     if gaps:
         notes.append(f"{gaps} of {len(periods)} periods had no clear image and are left out of the animation.")
+    if glinted:
+        notes.append(f"Sun glint or smoke haze over water on {', '.join(glinted)}: "
+                     "water area there is likely underestimated.")
     result = {
         "run_id": run_id, "kind": "timelapse", "place": _place(aoi), "resolution_m": area.res,
         "metric": metric, "series": series, "headline": headline,

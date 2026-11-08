@@ -11,6 +11,8 @@ from engine.analysis import (
     pick_focus,
     reflectance,
     valid_mask,
+    water_glint,
+    WATER_GLINT_SWIR16,
 )
 
 BANDS = ("blue", "green", "red", "nir", "swir16", "swir22")
@@ -150,3 +152,23 @@ def test_pick_focus():
         "water": {"lost_ha": 10.0, "gained_ha": 0.0},
     }
     assert pick_focus(tie) == "vegetation"
+
+
+def test_water_mask_is_mndwi_or_scl_water():
+    before = stack(green=4000, swir16=6000, scl=4)
+    after = stack(green=4000, swir16=6000, scl=4)
+    after["scl"][2, :4] = 6  # SCL water with MNDWI < 0 (glint): still water
+    s = change_stats(before, after, full_aoi(), PIXEL_HA)
+    assert s["water"]["after_ha"] == 0.04 and s["water"]["gained_ha"] == 0.04
+    both = stack(green=6500, swir16=3500, scl=6)  # MNDWI > 0 and SCL 6: counted once
+    assert change_stats(both, both, full_aoi(), PIXEL_HA)["water"]["after_ha"] == 1.0
+
+
+def test_water_glint_none_and_value():
+    assert WATER_GLINT_SWIR16 == 0.10
+    st = stack(swir16=2000, scl=4)
+    assert water_glint(st, full_aoi()) is None
+    st["scl"][:6, :10] = 6  # 60 water pixels
+    assert abs(water_glint(st, full_aoi()) - 0.2) < 1e-9
+    st["scl"][:2, :10] = 4  # 40 left: below the 50-pixel minimum
+    assert water_glint(st, full_aoi()) is None

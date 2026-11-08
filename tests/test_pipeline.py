@@ -289,3 +289,72 @@ def test_timelapse_water_series_in_hectares(tmp_cache, tmp_path):
                       RunStore(tmp_path / "runs"), search=make_search(scenes), reader=make_reader({}))
     assert [s["value"] for s in r["series"]] == [0.0, 0.0]
     assert r["headline"].startswith("Water area ranged from 0.0 ha")
+
+
+def water_reader(glint_dates=()):
+    """Clear pixels are SCL water; swir16 is dark on clean dates and bright on glinted ones."""
+    base = make_reader({})
+
+    def reader(scenes, grid, bands, cache_dir):
+        d = scenes[0].date
+        out = base(scenes, grid, bands, cache_dir)
+        if "scl" in out:
+            out["scl"] = np.where(out["scl"] == 4, 6, out["scl"]).astype(np.uint8)
+        if "swir16" in out:
+            out["swir16"] = np.full_like(out["swir16"], 2000 if d in glint_dates else 100)
+        return out
+    return reader
+
+
+def test_timelapse_water_prefers_non_glinted_date(tmp_cache, tmp_path):
+    scenes = [scene("2024-09-05", 3), scene("2024-09-20", 6)]
+    clear = {"2024-09-20": 0.8}
+    r = run_timelapse(AOI, date(2024, 9, 1), date(2024, 9, 30), "month", "water", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=make_search(scenes),
+                      reader=Clearing(water_reader({"2024-09-05"}), clear))
+    pt = r["series"][0]
+    assert pt["date"] == "2024-09-20" and "flag" not in pt
+    assert abs(pt["clear"] - 0.8) <= 0.02
+    assert not any("glint" in n for n in r["notes"])
+
+
+def test_timelapse_water_flags_glint_when_only_option(tmp_cache, tmp_path):
+    scenes = [scene("2024-09-05", 3), scene("2024-10-12", 3)]
+    r = run_timelapse(AOI, date(2024, 9, 1), date(2024, 10, 31), "month", "water", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=make_search(scenes),
+                      reader=water_reader({"2024-09-05"}))
+    assert r["series"][0]["flag"] == "glint" and "flag" not in r["series"][1]
+    assert r["series"][1]["clear"] == 1.0
+    note = next(n for n in r["notes"] if "glint" in n)
+    assert "2024-09-05" in note and "2024-10-12" not in note and "underestimated" in note
+
+
+def test_timelapse_ndvi_points_have_clear_and_no_flag(tmp_cache, tmp_path):
+    r = run_timelapse(AOI, date(2024, 9, 1), date(2024, 10, 31), "month", "ndvi", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=make_search([scene("2024-09-14")]),
+                      reader=water_reader({"2024-09-14"}))
+    assert r["series"][0]["clear"] == 1.0 and "flag" not in r["series"][0]
+    assert r["series"][1]["date"] is None
+
+
+def test_compare_notes_glint_on_a_side(tmp_cache, tmp_path):
+    scenes = [scene("2024-12-17"), scene("2025-02-14")]
+    r = run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "water", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=make_search(scenes),
+                    reader=water_reader({"2024-12-17"}))
+    notes = [n for n in r["notes"] if "glint" in n]
+    assert len(notes) == 1 and "2024-12-17" in notes[0] and "water figures" in notes[0]
+
+
+class Clearing:
+    """Reader wrapper that forces a clear fraction per date by clouding the right-hand columns."""
+    def __init__(self, inner, clear):
+        self.inner, self.clear = inner, clear
+
+    def __call__(self, scenes, grid, bands, cache_dir):
+        out = self.inner(scenes, grid, bands, cache_dir)
+        f = self.clear.get(scenes[0].date)
+        if f is not None and "scl" in out:
+            out["scl"] = out["scl"].copy()
+            out["scl"][:, int(round(grid.width * f)):] = 9
+        return out

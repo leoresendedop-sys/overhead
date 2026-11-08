@@ -13,6 +13,9 @@ DNBR_HIGH = 0.66
 WATER_MNDWI = 0.0
 LOW_CONF_VALID = 0.70
 COMPOSITE_BELOW = 0.80
+SCL_WATER = 6
+WATER_GLINT_SWIR16 = 0.10  # median swir16 reflectance over SCL-water above this means glint or haze
+GLINT_MIN_PIXELS = 50
 
 _BANDS = ("blue", "green", "red", "nir", "swir16", "swir22")
 
@@ -79,6 +82,26 @@ def composite_median(stacks: list[dict[str, np.ndarray]]) -> dict[str, np.ndarra
     return out
 
 
+def water_glint(stack: dict, aoi: np.ndarray) -> float | None:
+    """Median swir16 reflectance over AOI pixels classified as water (SCL 6), or None if < 50."""
+    sel = aoi & (stack["scl"] == SCL_WATER) & (stack["swir16"] != 0)
+    if int(sel.sum()) < GLINT_MIN_PIXELS:
+        return None
+    return float(np.median(stack["swir16"][sel].astype(np.float64) / 10000.0))
+
+
+def is_glinted(stack: dict, aoi: np.ndarray) -> bool:
+    g = water_glint(stack, aoi)
+    return g is not None and g > WATER_GLINT_SWIR16
+
+
+def water_mask(stack: dict, base: np.ndarray) -> np.ndarray:
+    """MNDWI > 0 or SCL water, inside `base`. SCL water still counts under glint, when MNDWI fails."""
+    m = mndwi(reflectance64(stack["green"]), reflectance64(stack["swir16"]))
+    with np.errstate(invalid="ignore"):
+        return base & (np.isfinite(m) & (m > WATER_MNDWI) | (stack["scl"] == SCL_WATER))
+
+
 def _ha(mask: np.ndarray, pixel_ha: float) -> float:
     return round(float(mask.sum()) * pixel_ha, 2)
 
@@ -98,7 +121,6 @@ def change_stats(before: dict, after: dict, aoi: np.ndarray, pixel_ha: float) ->
 
     ndvi_b, ndvi_a = idx(ndvi, "red", "nir", before), idx(ndvi, "red", "nir", after)
     nbr_b, nbr_a = idx(nbr, "nir", "swir22", before), idx(nbr, "nir", "swir22", after)
-    wat_b, wat_a = idx(mndwi, "green", "swir16", before), idx(mndwi, "green", "swir16", after)
 
     with np.errstate(invalid="ignore"):
         ok_v = base & np.isfinite(ndvi_b) & np.isfinite(ndvi_a)
@@ -112,11 +134,9 @@ def change_stats(before: dict, after: dict, aoi: np.ndarray, pixel_ha: float) ->
         burn_mod = ok_b & (dnbr >= DNBR_MOD) & (dnbr < DNBR_HIGH)
         burn_high = ok_b & (dnbr >= DNBR_HIGH)
 
-        ok_w = base & np.isfinite(wat_b) & np.isfinite(wat_a)
-        w_b = ok_w & (wat_b > WATER_MNDWI)
-        w_a = ok_w & (wat_a > WATER_MNDWI)
+    w_b, w_a = water_mask(before, base), water_mask(after, base)
     water_loss = w_b & ~w_a
-    water_gain = ~w_b & w_a & ok_w
+    water_gain = ~w_b & w_a
 
     return {
         "valid_fraction": round(valid_fraction, 4),
