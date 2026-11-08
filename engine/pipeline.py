@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -14,7 +15,8 @@ from .analysis import (
     COMPOSITE_BELOW,
     change_stats,
     clear_fraction,
-    _refl64,
+    DNBR_MOD,
+    reflectance64,
     composite_median,
     mndwi,
     nbr,
@@ -46,13 +48,16 @@ from .stac import COLLECTION, STAC_URL, Scene, group_by_date, search_scenes
 FIRST_DATE = date(2017, 3, 28)  # Sentinel-2 L2A global coverage starts around here
 FOCUSES = ("auto", "vegetation", "burn", "water")
 MIN_CLEAR = 0.30
+SUGGEST_CLEAR = 0.60
+STOP_CLEAR = 0.95
 MIN_CLEAR_TIMELAPSE = 0.60
 MAX_FRAMES = 24
+WORKERS = 6  # orchestration threads; HTTP reads are bounded by the shared pool in raster
 ALL_BANDS = ["blue", "green", "red", "nir", "swir16", "swir22", "scl"]
 METRICS = {
     "ndvi": (["nir"], "Mean NDVI"),
     "water": (["swir16"], "Water area (ha)"),
-    "burn": (["nir", "swir22"], "Mean NBR"),
+    "burn": (["nir", "swir22"], "Burned area (ha)"),
 }
 _DATE_RE = re.compile(r"^(\d{4})-(\d{2})(?:-(\d{2}))?$")
 
@@ -102,11 +107,23 @@ def _lowest_cloud(groups: dict[str, list[Scene]], n: int) -> list[str]:
     return sorted(groups, key=lambda d: (_mean_cloud(groups[d]), d))[:n]
 
 
-def _clear_by_date(area: _Area, groups, dates, reader, cache_dir) -> dict[str, float]:
-    out = {}
-    for d in dates:
+def _clear_by_date(area: _Area, groups, dates, reader, cache_dir, pool=None) -> dict[str, tuple[float, np.ndarray]]:
+    """Clear fraction (and the coarse SCL) per date; concurrent when a pool is given."""
+    def one(d):
         scl = reader(groups[d], area.cgrid, ["scl"], cache_dir)["scl"]
-        out[d] = clear_fraction(scl, area.cmask)
+        return clear_fraction(scl, area.cmask), scl
+    results = list(pool.map(one, dates)) if pool else [one(d) for d in dates]
+    return dict(zip(dates, results))
+
+
+def _rank_clearest(area: _Area, groups, limit, reader, cache_dir, pool=None, batch=2):
+    """Evaluate the lowest-cloud dates in small batches; stop once one is nearly cloud-free."""
+    order = _lowest_cloud(groups, limit)
+    out: dict = {}
+    for i in range(0, len(order), batch):
+        out.update(_clear_by_date(area, groups, order[i:i + batch], reader, cache_dir, pool))
+        if max(v[0] for v in out.values()) >= STOP_CLEAR:
+            break
     return out
 
 
@@ -141,28 +158,30 @@ def run_scenes(aoi: AOI, start: date, end: date, cache_dir: Path, *, max_results
     area = _Area(aoi)
     groups = group_by_date(search(aoi, start, end, cache_dir))
     dates = _lowest_cloud(groups, 3 * max_results)
-    clear = _clear_by_date(area, groups, dates, reader, cache_dir)
-    ranked = sorted(dates, key=lambda d: (-clear[d], d))[:max_results]
+    with ThreadPoolExecutor(WORKERS) as pool:
+        clear = _clear_by_date(area, groups, dates, reader, cache_dir, pool)
+    ranked = sorted(dates, key=lambda d: (-clear[d][0], d))[:max_results]
     return {
         "place": _place(aoi),
-        "dates": [{"date": d, "aoi_clear_fraction": round(clear[d], 2), "tiles": len(groups[d])}
+        "dates": [{"date": d, "aoi_clear_fraction": round(clear[d][0], 2), "tiles": len(groups[d])}
                   for d in ranked],
     }
 
 
 # ---------------------------------------------------------------- compare
 
-def _suggest(area: _Area, target: date, cache_dir, search, reader) -> list[dict]:
+def _suggest(area: _Area, target: date, cache_dir, search, reader, pool) -> list[dict]:
     end = min(target + timedelta(days=90), date.today())
     groups = group_by_date(search(area.aoi, target - timedelta(days=90), end, cache_dir))
     dates = _lowest_cloud(groups, 8)
-    clear = _clear_by_date(area, groups, dates, reader, cache_dir)
-    best = sorted((d for d in dates if clear[d] > 0), key=lambda d: (-clear[d], d))[:3]
-    return [{"date": d, "clear_fraction": round(clear[d], 2)} for d in best]
+    clear = {d: v[0] for d, v in _clear_by_date(area, groups, dates, reader, cache_dir, pool).items()}
+    ranked = sorted((d for d in dates if clear[d] > 0), key=lambda d: (-clear[d], d))
+    good = [d for d in ranked if clear[d] >= SUGGEST_CLEAR]
+    return [{"date": d, "clear_fraction": round(clear[d], 2)} for d in (good or ranked)[:3]]
 
 
-def _fail(area: _Area, target: date, side: str, cache_dir, search, reader):
-    sugg = _suggest(area, target, cache_dir, search, reader)
+def _fail(area: _Area, target: date, side: str, cache_dir, search, reader, pool):
+    sugg = _suggest(area, target, cache_dir, search, reader, pool)
     msg = f"No clear image near {target.isoformat()} ({side})."
     if sugg:
         msg += " Clearest nearby dates: " + ", ".join(
@@ -173,39 +192,45 @@ def _fail(area: _Area, target: date, side: str, cache_dir, search, reader):
     raise NoClearScene(msg, suggestions=sugg, side=side, target=target.isoformat())
 
 
-def _pick_side(area: _Area, target: date, side: str, window: int, cache_dir, search, reader) -> dict:
-    today = date.today()
-    scenes = search(area.aoi, target - timedelta(days=window), min(target + timedelta(days=window), today),
-                    cache_dir)
+def _rank_side(area: _Area, target: date, side: str, window: int, cache_dir, search, reader, pool) -> dict:
+    """Search and rank one side with coarse SCL only; decides single scene vs composite."""
+    scenes = search(area.aoi, target - timedelta(days=window),
+                    min(target + timedelta(days=window), date.today()), cache_dir)
     groups = group_by_date(scenes)
     if not groups:
-        _fail(area, target, side, cache_dir, search, reader)
-    cand = _lowest_cloud(groups, 6)
-    clear = _clear_by_date(area, groups, cand, reader, cache_dir)
-    gap = {d: abs((date.fromisoformat(d) - target).days) for d in cand}
-    ranked = sorted(cand, key=lambda d: (-clear[d], gap[d]))
+        _fail(area, target, side, cache_dir, search, reader, pool)
+    clear = _rank_clearest(area, groups, 6, reader, cache_dir, pool)
+    gap = {d: abs((date.fromisoformat(d) - target).days) for d in clear}
+    ranked = sorted(clear, key=lambda d: (-clear[d][0], gap[d]))
     best = ranked[0]
-    note = None
-    if clear[best] < COMPOSITE_BELOW and len(ranked) >= 2:
+    use = [best]
+    est = clear[best][0]
+    if est < COMPOSITE_BELOW and len(ranked) >= 2:
         use = ranked[:3]
-        comp = composite_median([reader(groups[d], area.grid, ALL_BANDS, cache_dir) for d in use])
-        frac = clear_fraction(comp["scl"], area.mask)
-        stack = comp
-        used = [s for d in use for s in groups[d]]
-        composite = True
-        note = f"{'Before' if side == 'before' else 'After'} image is a median of {len(use)} scenes (cloudy period)."
+        union = np.zeros_like(clear[best][1], dtype=bool)
+        for d in use:
+            union |= valid_mask(clear[d][1])
+        est = float((union & area.cmask).sum()) / max(1, int(area.cmask.sum()))
+    if est < MIN_CLEAR:  # fail before any full-resolution read
+        _fail(area, target, side, cache_dir, search, reader, pool)
+    return {"side": side, "target": target, "best": best, "use": use, "groups": groups,
+            "coarse": clear[best][0]}
+
+
+def _load_side(area: _Area, plan: dict, stacks: dict) -> dict:
+    use, groups, best, side = plan["use"], plan["groups"], plan["best"], plan["side"]
+    composite = len(use) > 1
+    if composite:
+        stack = composite_median([stacks[d] for d in use])
+        frac = clear_fraction(stack["scl"], area.mask)
+        label = "Before" if side == "before" else "After"
+        note = f"{label} image is a median of {len(use)} scenes (cloudy period)."
     else:
-        frac = clear[best]
-        stack = reader(groups[best], area.grid, ALL_BANDS, cache_dir)
-        used = list(groups[best])
-        composite = False
-    if frac < MIN_CLEAR:
-        _fail(area, target, side, cache_dir, search, reader)
-    return {
-        "requested": target.isoformat(), "date": best, "scenes": [s.id for s in used],
-        "composite": composite, "clear_fraction": round(frac, 2),
-        "_stack": stack, "_used": used, "_note": note, "_date": date.fromisoformat(best),
-    }
+        stack, frac, note = stacks[best], plan["coarse"], None
+    used = [s for d in use for s in groups[d]]
+    return {"requested": plan["target"].isoformat(), "date": best, "scenes": [s.id for s in used],
+            "composite": composite, "clear_fraction": round(frac, 2),
+            "_stack": stack, "_used": used, "_note": note, "_date": date.fromisoformat(best)}
 
 
 def run_compare(aoi: AOI, before: date, after: date, focus: str, window_days: int, cache_dir: Path,
@@ -214,19 +239,34 @@ def run_compare(aoi: AOI, before: date, after: date, focus: str, window_days: in
         raise BadInput("after must be later than before; swap the two dates.")
     if focus not in FOCUSES:
         raise BadInput(f"focus must be one of {', '.join(FOCUSES)}.")
-    window_days = max(1, min(int(window_days), 90))
+    if isinstance(window_days, bool) or not isinstance(window_days, int) or not 1 <= window_days <= 120:
+        raise BadInput("window_days must be a whole number of days between 1 and 120.")
     area = _Area(aoi)
-    sides = {
-        "before": _pick_side(area, before, "before", window_days, cache_dir, search, reader),
-        "after": _pick_side(area, after, "after", window_days, cache_dir, search, reader),
-    }
+    with ThreadPoolExecutor(2) as side_pool, ThreadPoolExecutor(WORKERS) as pool:
+        futs = [side_pool.submit(_rank_side, area, t, side, window_days, cache_dir, search, reader, pool)
+                for t, side in ((before, "before"), (after, "after"))]
+        plans = []
+        for f in futs:  # before's failure is reported first
+            plans.append(f.result())
+        # full-resolution reads of both sides at once (the readers share one HTTP pool)
+        jobs = [(p["side"], d) for p in plans for d in p["use"]]
+        reads = [pool.submit(reader, plans[0 if side == "before" else 1]["groups"][d], area.grid,
+                             ALL_BANDS, cache_dir) for side, d in jobs]
+        got = {job: r.result() for job, r in zip(jobs, reads)}
+    sides = {p["side"]: _load_side(area, p, {d: got[(p["side"], d)] for d in p["use"]}) for p in plans}
+    for side, s in sides.items():
+        if s["clear_fraction"] < MIN_CLEAR:
+            with ThreadPoolExecutor(WORKERS) as pool:
+                _fail(area, plans[0 if side == "before" else 1]["target"], side, cache_dir, search,
+                      reader, pool)
     stats = change_stats(sides["before"]["_stack"], sides["after"]["_stack"], area.mask, area.pixel_ha)
     masks = stats.pop("masks")
     if focus == "auto":
         focus = pick_focus(stats)
     d1, d2 = sides["before"]["_date"], sides["after"]["_date"]
     headline = compare_headline(stats, focus, d1, d2)
-    notes = compare_notes(area.res, stats, [s["_note"] for s in sides.values() if s["_note"]])
+    side_notes = [s["_note"] for s in sides.values() if s["_note"]]
+    notes = compare_notes(area.res, stats, side_notes)
 
     run_id, rdir = store.new("compare")
     img_b, img_a = _rgb_image(sides["before"]["_stack"]), _rgb_image(sides["after"]["_stack"])
@@ -238,7 +278,6 @@ def run_compare(aoi: AOI, before: date, after: date, focus: str, window_days: in
     _save_jpeg(img_b, Path(files["before"]))
     _save_jpeg(img_a, Path(files["after"]))
     overlay(Image.new("RGBA", img_a.size, (0, 0, 0, 0)), masks, focus).save(files["overlay"], "PNG")
-    side_notes = [s["_note"] for s in sides.values() if s["_note"]]
     pct = round(stats["valid_fraction"] * 100)
     # the bundled panel font has no "≈" or minus glyph
     lines = [headline.replace("≈ ", "~").replace("\u2212", "-"),
@@ -286,14 +325,24 @@ def _period_of(iso: str, step: str) -> str:
     return y
 
 
-def _metric_value(metric: str, stack: dict, area: _Area) -> float | None:
+def _metric_value(metric: str, stack: dict, area: _Area, first: dict | None = None) -> float | None:
+    """ndvi: mean over valid AOI pixels; water: hectares; burn: hectares with dNBR >= 0.27 vs `first`."""
     ok = area.mask & valid_mask(stack["scl"])
+    if metric == "burn":
+        if first is None:
+            return 0.0
+        ok &= valid_mask(first["scl"])
+        d = nbr(reflectance64(first["nir"]), reflectance64(first["swir22"])) - \
+            nbr(reflectance64(stack["nir"]), reflectance64(stack["swir22"]))
+        ok &= np.isfinite(d)
+        if not ok.any():
+            return None
+        with np.errstate(invalid="ignore"):
+            return round(float((np.round(d[ok], 9) >= DNBR_MOD).sum()) * area.pixel_ha, 2)
     if metric == "ndvi":
-        v = ndvi(_refl64(stack["red"]), _refl64(stack["nir"]))
-    elif metric == "burn":
-        v = nbr(_refl64(stack["nir"]), _refl64(stack["swir22"]))
+        v = ndvi(reflectance64(stack["red"]), reflectance64(stack["nir"]))
     else:
-        v = mndwi(_refl64(stack["green"]), _refl64(stack["swir16"]))
+        v = mndwi(reflectance64(stack["green"]), reflectance64(stack["swir16"]))
     ok &= np.isfinite(v)
     if not ok.any():
         return None
@@ -329,20 +378,30 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
     extra, metric_label = METRICS[metric]
     bands = ["red", "green", "blue", "scl", *extra]
 
-    series, frames, used = [], [], []
-    for p in periods:
+    def best_of(p):
         pg = by_period[p]
-        cand = _lowest_cloud(pg, 3)
-        clear = _clear_by_date(area, pg, cand, reader, cache_dir)
-        best = sorted(cand, key=lambda d: (-clear[d], d))[:1]
-        if not best or clear[best[0]] < MIN_CLEAR_TIMELAPSE:
+        if not pg:
+            return None
+        clear = _rank_clearest(area, pg, 3, reader, cache_dir, batch=1)
+        d = max(clear, key=lambda k: (clear[k][0], k))
+        return d if clear[d][0] >= MIN_CLEAR_TIMELAPSE else None
+
+    with ThreadPoolExecutor(WORKERS) as pool:
+        chosen = list(pool.map(best_of, periods))
+        reads = {p: pool.submit(reader, by_period[p][d], area.grid, bands, cache_dir)
+                 for p, d in zip(periods, chosen) if d}
+        stacks = {p: f.result() for p, f in reads.items()}
+
+    series, frames, used, first = [], [], [], None
+    for p, d in zip(periods, chosen):
+        if not d:
             series.append({"period": p, "date": None, "value": None})
             continue
-        d = best[0]
-        stack = reader(pg[d], area.grid, bands, cache_dir)
-        series.append({"period": p, "date": d, "value": _metric_value(metric, stack, area)})
+        stack = stacks[p]
+        first = first or stack
+        series.append({"period": p, "date": d, "value": _metric_value(metric, stack, area, first)})
         frames.append(annotate_frame(_rgb_image(stack), fmt_date(date.fromisoformat(d))))
-        used.extend(pg[d])
+        used.extend(by_period[p][d])
     if not frames:
         raise NoClearScene(
             f"No clear image found between {start.isoformat()} and {end.isoformat()}.",
@@ -364,11 +423,16 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
     unit = f"{step}{'' if len(periods) == 1 else 's'}"
     if len(vals) < 2:
         headline = f"Only one clear image found over {len(periods)} {unit}."
+    elif metric == "burn":
+        hi = max(vals, key=lambda s: s["value"])
+        headline = (f"Burned area reached {fmt_ha(hi['value'])} ha ({_label(hi['period'], step)}) "
+                    f"over {len(periods)} {unit}." if hi["value"] > 0
+                    else f"No burned area detected over {len(periods)} {unit}.")
     else:
         lo = min(vals, key=lambda s: s["value"])
         hi = max(vals, key=lambda s: s["value"])
         fmt = (lambda v: f"{fmt_ha(v)} ha") if metric == "water" else (lambda v: f"{v:.3f}")
-        name = {"ndvi": "Mean NDVI", "water": "Water area", "burn": "Mean NBR"}[metric]
+        name = "Water area" if metric == "water" else "Mean NDVI"
         headline = (f"{name} ranged from {fmt(lo['value'])} ({_label(lo['period'], step)}) to "
                     f"{fmt(hi['value'])} ({_label(hi['period'], step)}) over {len(periods)} {unit}.")
     notes = [f"Resolution {area.res} m: objects smaller than ~{2 * area.res} m are not visible."]

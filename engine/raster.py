@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,8 +38,23 @@ GDAL_OPTIONS = {
     "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif",
     "GDAL_HTTP_MULTIRANGE": "YES",
     "VSI_CACHE": "TRUE",
+    "GDAL_INGESTED_BYTES_AT_OPEN": "32768",
+    "GDAL_HTTP_MAX_RETRY": "3",
+    "GDAL_HTTP_RETRY_DELAY": "1",
 }
-MAX_WORKERS = 8
+MAX_WORKERS = 12
+_OVERVIEW_PROBE: dict[tuple[str, int], int | None] = {}  # (href, target res) -> overview index
+_pool: ThreadPoolExecutor | None = None
+_pool_lock = threading.Lock()
+
+
+def _shared_pool() -> ThreadPoolExecutor:
+    """One process-wide pool for HTTP reads, so concurrent callers cannot multiply threads."""
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="overhead-read")
+        return _pool
 CATEGORICAL_BANDS = {"scl"}
 
 
@@ -94,8 +110,13 @@ def read_band(href: str, grid: Grid, *, categorical: bool = False) -> np.ndarray
     with rasterio.Env(**GDAL_OPTIONS):
         level = None
         if grid.res > 10:
-            with rasterio.open(href) as src:
-                level = choose_overview(src.res[0], list(src.overviews(1)), grid.res)
+            probe = (href, grid.res)
+            if probe in _OVERVIEW_PROBE:  # the header is read once per href and target resolution
+                level = _OVERVIEW_PROBE[probe]
+            else:
+                with rasterio.open(href) as src:
+                    level = choose_overview(src.res[0], list(src.overviews(1)), grid.res)
+                _OVERVIEW_PROBE[probe] = level
         kwargs = {} if level is None else {"overview_level": level}
         with rasterio.open(href, **kwargs) as src:
             with WarpedVRT(
@@ -157,12 +178,12 @@ def read_date_stack(
     todo = [b for b in bands if b not in out]
     if todo:
         jobs = [(b, s) for b in todo for s in scenes]
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            futures = [
-                pool.submit(read_band, s.assets[b], grid, categorical=b in CATEGORICAL_BANDS)
-                for b, s in jobs
-            ]
-            results = [f.result() for f in futures]
+        pool = _shared_pool()
+        futures = [
+            pool.submit(read_band, s.assets[b], grid, categorical=b in CATEGORICAL_BANDS)
+            for b, s in jobs
+        ]
+        results = [f.result() for f in futures]
         for b in todo:
             tiles = [r for (jb, _), r in zip(jobs, results) if jb == b]
             out[b] = mosaic_first_valid(tiles)

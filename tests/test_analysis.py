@@ -138,13 +138,15 @@ def test_composite_median_skips_clouds():
 def test_pick_focus():
     stats = {
         "vegetation": {"lost_ha": 20.0, "gained_ha": 10.0},
-        "burn": {"low_ha": 100.0, "moderate_ha": 15.0, "high_ha": 5.0},
+        "burn": {"low_ha": 100.0, "moderate_ha": 35.0, "high_ha": 5.0},
         "water": {"lost_ha": 1.0, "gained_ha": 0.0},
     }
     assert pick_focus(stats) == "burn"
+    noisy = {**stats, "burn": {"low_ha": 900.0, "moderate_ha": 2.0, "high_ha": 1.0}}
+    assert pick_focus(noisy) == "vegetation"  # low-severity dNBR is noise, not counted
     tie = {
         "vegetation": {"lost_ha": 5.0, "gained_ha": 5.0},
-        "burn": {"low_ha": 10.0, "moderate_ha": 0.0, "high_ha": 0.0},
+        "burn": {"low_ha": 0.0, "moderate_ha": 10.0, "high_ha": 0.0},
         "water": {"lost_ha": 10.0, "gained_ha": 0.0},
     }
     assert pick_focus(tie) == "vegetation"

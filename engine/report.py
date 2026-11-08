@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from .render import _OVERLAY_COLORS
+from .render import OVERLAY_COLORS
 
 LABELS = {
     "veg_loss": "Vegetation loss",
@@ -27,13 +27,12 @@ def fmt_date(d: date) -> str:
 
 
 def legend_for(focus: str) -> list[tuple[str, str]]:
-    return [(color, LABELS[key]) for key, color in _OVERLAY_COLORS[focus]]
+    return [(color, LABELS[key]) for key, color in OVERLAY_COLORS[focus]]
 
 
 def focus_total(stats: dict, focus: str) -> float:
     if focus == "burn":
-        b = stats["burn"]
-        return b["low_ha"] + b["moderate_ha"] + b["high_ha"]
+        return stats["burn"]["moderate_ha"] + stats["burn"]["high_ha"]
     if focus == "vegetation":
         return stats["vegetation"]["lost_ha"] + stats["vegetation"]["gained_ha"]
     return stats["water"]["lost_ha"] + stats["water"]["gained_ha"]
@@ -45,7 +44,7 @@ def compare_headline(stats: dict, focus: str, d1: date, d2: date) -> str:
         return f"No significant {focus} change detected {span}"
     if focus == "burn":
         b = stats["burn"]
-        total = b["low_ha"] + b["moderate_ha"] + b["high_ha"]
+        total = b["moderate_ha"] + b["high_ha"]
         high = f" ({fmt_ha(b['high_ha'])} ha high severity)" if b["high_ha"] > 0 else ""
         return f"≈ {fmt_ha(total)} ha burned{high} {span}"
     if focus == "vegetation":
@@ -54,9 +53,13 @@ def compare_headline(stats: dict, focus: str, d1: date, d2: date) -> str:
                 f"{fmt_ha(v['gained_ha'])} ha gained {span}")
     w = stats["water"]
     delta = round(w["after_ha"] - w["before_ha"], 2)
-    sign = "+" if delta >= 0 else MINUS
+    change = fmt_ha(abs(delta))
+    if change in ("0.0", "0"):
+        diff = "no net change"
+    else:
+        diff = f"{'+' if delta > 0 else MINUS}{change} ha"
     return (f"Water area went from {fmt_ha(w['before_ha'])} ha to {fmt_ha(w['after_ha'])} ha "
-            f"({sign}{fmt_ha(abs(delta))} ha) {span}")
+            f"({diff}) {span}")
 
 
 def compare_notes(res: int, stats: dict, side_notes: list[str]) -> list[str]:

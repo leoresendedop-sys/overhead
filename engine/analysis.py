@@ -29,11 +29,15 @@ def clear_fraction(scl: np.ndarray, aoi: np.ndarray) -> float:
     return float((valid_mask(scl) & aoi).sum()) / n
 
 
-def reflectance(dn: np.ndarray) -> np.ndarray:
-    """DN / 10000 as float32, with DN 0 (nodata) as NaN. No BOA offset is applied."""
-    out = dn.astype(np.float32) / np.float32(10000.0)
+def reflectance(dn: np.ndarray, dtype=np.float32) -> np.ndarray:
+    """DN / 10000 (float32 by default), with DN 0 (nodata) as NaN. No BOA offset is applied."""
+    out = dn.astype(dtype) / dtype(10000.0)
     out[dn == 0] = np.nan
     return out
+
+
+def reflectance64(dn: np.ndarray) -> np.ndarray:
+    return reflectance(dn, np.float64)
 
 
 def _norm_diff(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -55,12 +59,6 @@ def nbr(nir, swir22):
 
 def mndwi(green, swir16):
     return _norm_diff(green, swir16)
-
-
-def _refl64(dn: np.ndarray) -> np.ndarray:
-    out = dn.astype(np.float64) / 10000.0
-    out[dn == 0] = np.nan
-    return out
 
 
 def composite_median(stacks: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
@@ -96,7 +94,7 @@ def change_stats(before: dict, after: dict, aoi: np.ndarray, pixel_ha: float) ->
     valid_fraction = float(base.sum()) / n_aoi if n_aoi else 0.0
 
     def idx(fn, a, b, stack):
-        return fn(_refl64(stack[a]), _refl64(stack[b]))
+        return fn(reflectance64(stack[a]), reflectance64(stack[b]))
 
     ndvi_b, ndvi_a = idx(ndvi, "red", "nir", before), idx(ndvi, "red", "nir", after)
     nbr_b, nbr_a = idx(nbr, "nir", "swir22", before), idx(nbr, "nir", "swir22", after)
@@ -159,7 +157,8 @@ def pick_focus(stats: dict) -> str:
     """Focus with the most changed hectares; ties go vegetation, burn, water."""
     totals = {
         "vegetation": stats["vegetation"]["lost_ha"] + stats["vegetation"]["gained_ha"],
-        "burn": stats["burn"]["low_ha"] + stats["burn"]["moderate_ha"] + stats["burn"]["high_ha"],
+        # low-severity dNBR is mostly seasonal/urban noise, so burn counts moderate + high only
+        "burn": stats["burn"]["moderate_ha"] + stats["burn"]["high_ha"],
         "water": stats["water"]["lost_ha"] + stats["water"]["gained_ha"],
     }
     return max(totals, key=lambda k: totals[k])  # max keeps the first of equal keys

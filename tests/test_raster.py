@@ -120,3 +120,28 @@ def test_read_date_stack_uses_cache(tmp_cache, monkeypatch):
         f.write_bytes(b"junk")
     third = read_date_stack(scenes, g, ["red"], tmp_cache)
     assert len(calls) == 4 and (third["red"] == 7).all()
+
+
+def test_read_band_probes_overviews_once_per_href(tmp_path, monkeypatch):
+    from rasterio.enums import Resampling
+    from engine import raster as r
+    p = tmp_path / "ov.tif"
+    _write_tif(p, np.full((64, 64), 5, np.uint16), x0=300000.0, y0=7400640.0)
+    with rasterio.open(p, "r+") as dst:
+        dst.build_overviews([2, 4], Resampling.nearest)
+    g = Grid(32723, (40.0, 0.0, 300000.0, 0.0, -40.0, 7400640.0), 16, 16, 40)
+    opens = []
+    real = rasterio.open
+    monkeypatch.setattr(r.rasterio, "open", lambda *a, **k: (opens.append(k), real(*a, **k))[1])
+    r._OVERVIEW_PROBE.clear()
+    first = read_band(str(p), g)
+    n_first = len(opens)
+    second = read_band(str(p), g)
+    assert n_first == 2 and len(opens) == n_first + 1  # probe is cached for the same href
+    assert (first == 5).all() and np.array_equal(first, second)
+
+
+def test_gdal_options_ask_for_header_bytes_and_retries():
+    assert raster.GDAL_OPTIONS["GDAL_INGESTED_BYTES_AT_OPEN"] == "32768"
+    assert raster.GDAL_OPTIONS["GDAL_HTTP_MAX_RETRY"] == "3"
+    assert raster.GDAL_OPTIONS["GDAL_HTTP_RETRY_DELAY"] == "1"

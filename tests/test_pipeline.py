@@ -7,6 +7,7 @@ from PIL import Image
 
 from engine.aoi import aoi_from_point
 from engine.errors import BadInput, NoClearScene
+from engine.report import compare_headline, compare_notes
 from engine.pipeline import parse_date, run_compare, run_scenes, run_timelapse
 from engine.runs import RunStore
 from engine.stac import Scene
@@ -146,3 +147,145 @@ def test_run_store_rejects_traversal(tmp_path):
             store.dir(bad)
     rid, path = store.new("compare")
     assert store.dir(rid) == path and store.list() == []  # no result.json yet
+
+
+def _stats(**kw):
+    base = {"vegetation": {"lost_ha": 0.0, "gained_ha": 0.0},
+            "burn": {"low_ha": 0.0, "moderate_ha": 0.0, "high_ha": 0.0},
+            "water": {"before_ha": 0.0, "after_ha": 0.0, "lost_ha": 0.0, "gained_ha": 0.0}}
+    base.update(kw)
+    return base
+
+
+D1, D2 = date(2024, 12, 17), date(2025, 2, 14)
+SPAN = "between 17 Dec 2024 and 14 Feb 2025"
+
+
+@pytest.mark.parametrize("stats,focus,expected", [
+    (_stats(burn={"low_ha": 900.0, "moderate_ha": 2250.0, "high_ha": 1870.0}), "burn",
+     f"≈ 4,120 ha burned (1,870 ha high severity) {SPAN}"),
+    (_stats(burn={"low_ha": 9.0, "moderate_ha": 5.0, "high_ha": 0.0}), "burn", f"≈ 5.0 ha burned {SPAN}"),
+    (_stats(vegetation={"lost_ha": 310.4, "gained_ha": 12.0}), "vegetation",
+     f"≈ 310 ha of vegetation lost and 12 ha gained {SPAN}"),
+    (_stats(vegetation={"lost_ha": 3.04, "gained_ha": 0.0}), "vegetation",
+     f"≈ 3.0 ha of vegetation lost and 0.0 ha gained {SPAN}"),
+    (_stats(water={"before_ha": 5210.0, "after_ha": 3980.0, "lost_ha": 1300.0, "gained_ha": 70.0}), "water",
+     f"Water area went from 5,210 ha to 3,980 ha (−1,230 ha) {SPAN}"),
+    (_stats(water={"before_ha": 4.0, "after_ha": 15.0, "lost_ha": 0.0, "gained_ha": 11.0}), "water",
+     f"Water area went from 4.0 ha to 15 ha (+11 ha) {SPAN}"),
+    (_stats(water={"before_ha": 5.0, "after_ha": 5.04, "lost_ha": 0.5, "gained_ha": 0.54}), "water",
+     f"Water area went from 5.0 ha to 5.0 ha (no net change) {SPAN}"),
+    (_stats(), "burn", f"No significant burn change detected {SPAN}"),
+    (_stats(burn={"low_ha": 50.0, "moderate_ha": 0.0, "high_ha": 0.0}), "burn",
+     f"No significant burn change detected {SPAN}"),
+    (_stats(), "vegetation", f"No significant vegetation change detected {SPAN}"),
+    (_stats(), "water", f"No significant water change detected {SPAN}"),
+])
+def test_compare_headlines(stats, focus, expected):
+    assert compare_headline(stats, focus, D1, D2) == expected
+
+
+def test_compare_notes_large_area_and_low_confidence():
+    ok = {"confidence": "high", "valid_fraction": 0.95}
+    assert compare_notes(10, ok, []) == ["Resolution 10 m: objects smaller than ~20 m are not visible."]
+    notes = compare_notes(40, {"confidence": "low", "valid_fraction": 0.62}, ["Before image is a median of 3 scenes (cloudy period)."])
+    assert notes[0].startswith("Resolution 40 m: objects smaller than ~80 m")
+    assert "Large area: analysed at 40 m; small changes may be missed." in notes
+    assert any("62%" in n for n in notes)
+    assert notes[-1].startswith("Before image is a median")
+
+
+class Counting:
+    def __init__(self, inner):
+        self.inner, self.calls = inner, []
+
+    def __call__(self, scenes, grid, bands, cache_dir):
+        self.calls.append((scenes[0].date, tuple(bands)))
+        return self.inner(scenes, grid, bands, cache_dir)
+
+    def full(self):
+        return [c for c in self.calls if len(c[1]) > 1]
+
+    def scl(self):
+        return [c for c in self.calls if c[1] == ("scl",)]
+
+
+def test_compare_after_side_fails_before_any_full_read(tmp_cache, tmp_path):
+    scenes = [scene("2024-12-17"), scene("2025-02-14")]
+    rd = Counting(make_reader({"2025-02-14": 0.1}))
+    with pytest.raises(NoClearScene) as e:
+        run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "auto", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=make_search(scenes), reader=rd)
+    assert e.value.extra["side"] == "after" and "(after)" in e.value.message
+    assert rd.full() == []
+
+
+def test_compare_empty_search_suggests_nothing(tmp_cache, tmp_path):
+    with pytest.raises(NoClearScene) as e:
+        run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "auto", 30, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=make_search([]), reader=make_reader({}))
+    assert e.value.extra["suggestions"] == [] and "No usable images" in e.value.message
+
+
+def test_suggestions_are_ordered_and_prefer_clear_dates(tmp_cache, tmp_path):
+    scenes = [scene("2025-02-14", 5), scene("2025-01-20", 8), scene("2025-03-30", 9), scene("2025-04-20", 10),
+              scene("2025-05-05", 12), scene("2024-06-17")]
+    clear = {"2025-02-14": 0.1, "2025-01-20": 0.7, "2025-03-30": 0.9, "2025-04-20": 0.65, "2025-05-05": 0.4}
+    with pytest.raises(NoClearScene) as e:
+        run_compare(AOI, date(2024, 6, 15), date(2025, 2, 15), "auto", 15, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=make_search(scenes), reader=make_reader(clear))
+    sug = e.value.extra["suggestions"]
+    assert [s["date"] for s in sug] == ["2025-03-30", "2025-01-20", "2025-04-20"]
+    assert all(s["clear_fraction"] >= 0.6 for s in sug)
+    assert sug[0]["clear_fraction"] >= sug[1]["clear_fraction"] >= sug[2]["clear_fraction"]
+
+
+def test_suggestions_fall_back_when_none_reach_threshold(tmp_cache, tmp_path):
+    scenes = [scene("2025-02-14", 5), scene("2025-01-20", 8)]
+    with pytest.raises(NoClearScene) as e:
+        run_compare(AOI, date(2024, 6, 15), date(2025, 2, 15), "auto", 15, tmp_cache,
+                    RunStore(tmp_path / "runs"), search=make_search(scenes + [scene("2024-06-17")]),
+                    reader=make_reader({"2025-02-14": 0.1, "2025-01-20": 0.2}))
+    assert [s["date"] for s in e.value.extra["suggestions"]] == ["2025-01-20", "2025-02-14"]
+
+
+def test_compare_ranking_stops_when_a_scene_is_clear_enough(tmp_cache, tmp_path):
+    scenes = [scene(f"2024-12-{d:02d}", d) for d in (10, 12, 14, 16, 18, 20)] + [scene("2025-02-14")]
+    rd = Counting(make_reader({}))
+    run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "burn", 30, tmp_cache,
+                RunStore(tmp_path / "runs"), search=make_search(scenes), reader=rd)
+    before_scl = [c for c in rd.scl() if c[0] < "2025"]
+    assert len(before_scl) <= 2
+
+
+@pytest.mark.parametrize("bad", [0, 121, 2.5, "30", None, True])
+def test_compare_rejects_bad_window(tmp_cache, tmp_path, bad):
+    with pytest.raises(BadInput) as e:
+        run_compare(AOI, date(2024, 12, 15), date(2025, 2, 15), "auto", bad, tmp_cache,
+                    RunStore(tmp_path), search=make_search([]), reader=make_reader({}))
+    assert "window_days" in e.value.message
+
+
+def test_timelapse_no_clear_period_raises(tmp_cache, tmp_path):
+    with pytest.raises(NoClearScene):
+        run_timelapse(AOI, date(2024, 9, 1), date(2024, 10, 31), "month", "ndvi", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=make_search([scene("2024-09-14")]),
+                      reader=make_reader({"2024-09-14": 0.1}))
+
+
+def test_timelapse_burn_is_burned_hectares_vs_first_frame(tmp_cache, tmp_path):
+    scenes = [scene("2024-09-14"), scene("2024-10-12"), scene("2024-11-09"), scene("2024-12-05")]
+    r = run_timelapse(AOI, date(2024, 9, 1), date(2024, 12, 31), "month", "burn", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=make_search(scenes),
+                      reader=make_reader({}, burn_from="2024-11-01"))
+    vals = [s["value"] for s in r["series"]]
+    assert vals[0] == 0.0 and vals[1] == 0.0 and vals[2] > 0 and vals[3] == vals[2]
+    assert r["headline"].startswith("Burned area reached")
+
+
+def test_timelapse_water_series_in_hectares(tmp_cache, tmp_path):
+    scenes = [scene("2024-09-14"), scene("2024-10-12")]
+    r = run_timelapse(AOI, date(2024, 9, 1), date(2024, 10, 31), "month", "water", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=make_search(scenes), reader=make_reader({}))
+    assert [s["value"] for s in r["series"]] == [0.0, 0.0]
+    assert r["headline"].startswith("Water area ranged from 0.0 ha")

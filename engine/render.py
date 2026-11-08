@@ -17,7 +17,7 @@ LINE = "#4C9AFF"
 ATTRIBUTION = "Sentinel-2 L2A · Copernicus / ESA · via Earth Search"
 
 OVERLAY_ALPHA = 153  # 60 %
-_OVERLAY_COLORS: dict[str, list[tuple[str, str]]] = {
+OVERLAY_COLORS: dict[str, list[tuple[str, str]]] = {
     "vegetation": [("veg_loss", "#E5484D"), ("veg_gain", "#30A46C")],
     "burn": [("burn_low", "#F5D90A"), ("burn_mod", "#F76B15"), ("burn_high", "#E5484D")],
     "water": [("water_gain", "#0090FF"), ("water_loss", "#F76B15")],
@@ -57,7 +57,7 @@ def true_color(red: np.ndarray, green: np.ndarray, blue: np.ndarray) -> Image.Im
 def overlay(base: Image.Image, masks: dict[str, np.ndarray], focus: str) -> Image.Image:
     """Paint the masks of `focus` at 60 % alpha. RGB in, RGB out; RGBA in, RGBA out."""
     layer = np.zeros((base.height, base.width, 4), np.uint8)
-    for key, color in _OVERLAY_COLORS.get(focus, []):
+    for key, color in OVERLAY_COLORS.get(focus, []):
         mask = masks.get(key)
         if mask is None:
             continue
