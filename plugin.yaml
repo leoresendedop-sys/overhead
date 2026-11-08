@@ -2,9 +2,22 @@ name: overhead
 version: "0.1.0"
 manifest_version: 2
 api_version: 1
-description: What changed at this place between these dates? Free Sentinel-2 imagery.
+description: >-
+  What changed at this place between these dates? Measures vegetation loss, burned area and
+  water change in hectares anywhere on Earth from free Sentinel-2 imagery, with a before | after |
+  change panel or a timelapse GIF.
+author: Leo Resende
 license: MIT
 homepage: https://github.com/leoresendedop-sys/overhead
+tags: [earth-observation, satellite, maps, sentinel-2]
 requires_hermes: ">=0.22.5"
+provides_tools:
+  - overhead_locate
+  - overhead_scenes
+  - overhead_compare
+  - overhead_timelapse
+provides_hooks:
+  - post_tool_call
+  - transform_llm_output
 python_dependencies:
   - "rasterio>=1.4,<2"
