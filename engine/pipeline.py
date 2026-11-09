@@ -55,7 +55,7 @@ STOP_CLEAR = 0.95
 MIN_CLEAR_TIMELAPSE = 0.60
 MAX_FRAMES = 24
 MAX_SIDE_ITEMS = 500  # STAC items per compare side window (Earth Search returns the newest first)
-MAX_PERIOD_ITEMS = 200  # STAC items per timelapse period
+MAX_PERIOD_ITEMS = 200  # STAC items per request; saturated timelapse windows are split
 WORKERS = 6  # orchestration threads; HTTP reads are bounded by the shared pool in raster
 ALL_BANDS = ["blue", "green", "red", "nir", "swir16", "swir22", "scl"]
 METRICS = {
@@ -463,6 +463,26 @@ def timelapse_headline(series: list[dict], metric: str, step: str, n_periods: in
             f"{fmt(hi['value'])} ({_label(hi['period'], step)}) over {n_periods} {unit}.{caveat}")
 
 
+def _search_timelapse_window(aoi, lo, hi, cache_dir, search):
+    """Split saturated windows on day boundaries, keeping each date's tiles together.
+
+    An API without match counts is conservatively treated as saturated at the cap.
+    A single day cannot be split further; report any remaining possible truncation.
+    """
+    if lo > hi:
+        return [], False
+    scenes = search(aoi, lo, hi, cache_dir, max_items=MAX_PERIOD_ITEMS)
+    matched = getattr(scenes, "matched", None)
+    saturated = bool(truncation(scenes)) or (
+        matched is None and getattr(scenes, "returned", len(scenes)) >= MAX_PERIOD_ITEMS)
+    if not saturated or lo == hi:
+        return scenes, saturated
+    mid = lo + (hi - lo) // 2
+    left, left_cut = _search_timelapse_window(aoi, lo, mid, cache_dir, search)
+    right, right_cut = _search_timelapse_window(aoi, mid + timedelta(days=1), hi, cache_dir, search)
+    return [*left, *right], left_cut or right_cut
+
+
 def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cache_dir: Path,
                   store: RunStore, *, search=search_scenes, reader=read_date_stack) -> dict:
     if end < start:
@@ -478,16 +498,16 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
     area = _Area(aoi)
     last = min(end, date.today())
 
-    def search_period(p):  # one search per period: a single capped search loses the oldest ones
+    def search_period(p):
         first_day, last_day = _period_bounds(p, step)
         lo, hi = max(first_day, start), min(last_day, last)
-        return search(aoi, lo, hi, cache_dir, max_items=MAX_PERIOD_ITEMS) if lo <= hi else []
+        return _search_timelapse_window(aoi, lo, hi, cache_dir, search)
     with ThreadPoolExecutor(WORKERS) as pool:
         found = dict(zip(periods, pool.map(search_period, periods)))
     by_period: dict[str, dict[str, list[Scene]]] = {
-        p: {d: g for d, g in group_by_date(found[p]).items() if _period_of(d, step) == p}
+        p: {d: g for d, g in group_by_date(found[p][0]).items() if _period_of(d, step) == p}
         for p in periods}
-    cut = [p for p in periods if truncation(found[p])]
+    cut = [p for p in periods if found[p][1]]
     extra, metric_label = METRICS[metric]
     bands = ["red", "green", "blue", "scl", *extra]
 
@@ -551,9 +571,9 @@ def run_timelapse(aoi: AOI, start: date, end: date, step: str, metric: str, cach
         notes.append(f"Sun glint or smoke haze over water on {', '.join(glinted)}: "
                      "water area there is likely underestimated.")
     if cut:
-        notes.append(f"Searches for {len(cut)} of {len(periods)} periods matched more than "
-                     f"{MAX_PERIOD_ITEMS} scenes; only the newest {MAX_PERIOD_ITEMS} of each were "
-                     f"considered ({', '.join(cut)}).")
+        notes.append(f"Searches for {len(cut)} of {len(periods)} periods may be incomplete: "
+                     f"some individual days reached the {MAX_PERIOD_ITEMS}-scene search limit "
+                     f"even after splitting the date range ({', '.join(cut)}).")
     result = {
         "run_id": run_id, "kind": "timelapse", "place": _place(aoi), "resolution_m": area.res,
         "metric": metric, "series": series, "headline": headline,

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from conftest import load_plugin
 
@@ -41,9 +42,16 @@ def call(handlers, tool, args):
     started = time.perf_counter()
     raw = handlers[tool](dict(args))
     seconds = time.perf_counter() - started
-    text = raw["text_summary"] if isinstance(raw, dict) else raw
-    result = json.loads(text)
+    assert isinstance(raw, str)  # public JSON contract, no private multimodal envelope
+    result = json.loads(raw)
     assert "error" not in result, result["error"]
+    vision = result["visual_analysis"]
+    assert vision["tool"] == "vision_analyze" and 1 <= len(vision["requests"]) <= 2
+    for request in vision["requests"]:
+        assert set(request) == {"image_url", "question"}
+        assert Path(request["image_url"]).is_absolute()
+        with Image.open(request["image_url"]) as image:
+            image.verify()
     print(f"\n[live] {tool} {args.get('place')}: {seconds:.1f} s - {result['headline']}")
     return result, seconds
 

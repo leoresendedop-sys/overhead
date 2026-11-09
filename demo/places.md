@@ -63,7 +63,8 @@ at the bottom of the frame, which tells the story best.
 **Timing:** cold 67 s (other runs 56 s and 50 s), warm 0.6 s.
 
 Why a point: the place name resolves to the whole municipality
-(about 3.8 million ha, 175,000 ha "burned" at 80 m), which is useless as a picture. The point
+(about 3.8 million ha), whose projected grid exceeds the size limit even at 80 m,
+so it returns `area_too_large`. The point
 gives the town and the cleared pasture around it. The label keeps its accent: panels now use a Unicode font (and fold to ASCII when none is installed).
 
 ## 3. Rio Negro drought at Manaus, Brazil (water timelapse)

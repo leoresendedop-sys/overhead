@@ -145,7 +145,9 @@ def panel(
     avail = MAX_WIDTH - 2 * PAD - 2 * GAP
     scale = 1
     if before.width < MIN_PANE_W:  # whole-pixel blocks, so 10 m pixels stay visible as pixels
-        scale = min(math.ceil(MIN_PANE_W / before.width), max(1, MAX_UPSCALED_H // before.height))
+        scale = min(math.ceil(MIN_PANE_W / before.width),
+                    max(1, MAX_UPSCALED_H // before.height),
+                    max(1, (avail // 3) // before.width))
     pane_w = min(before.width * scale, avail // 3)
     pane_h = max(1, round(before.height * pane_w / before.width))
     resample = Image.NEAREST if pane_w > before.width else Image.LANCZOS

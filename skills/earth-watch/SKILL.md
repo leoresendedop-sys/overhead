@@ -46,7 +46,22 @@ image every few days since 2017). Every answer is backed by a tool result. Never
 4. End the reply with the line the `instruction` gives (`MEDIA:/path/...`), exactly as written,
    on a line of its own: not inside code, quotes or a sentence. It is how the panel or GIF
    reaches the user.
-5. If you can see the attached images, describe what is visible in a sentence or two.
+5. When visual interpretation is needed, use the public `vision_analyze` tool if available.
+   `visual_analysis.requests` supplies `image_url` (an existing local image path) and `question`;
+   pass those arguments to the tool. Compare supplies before/after images; timelapse supplies
+   first/last available frames (one request if there is only one frame). You can also inspect
+   `files.panel` for a compare or `files.chart` for the numeric trend. Do not assume one GIF call
+   examines every frame, or infer intermediate events from only the endpoints.
+6. Vision is a separate, optional tool call, not an automatic preview. Hermes chooses native
+   pixels or its configured auxiliary vision model, respecting global image routing. Calls may
+   add latency, image tokens and auxiliary model costs; use only the images needed for the request.
+   If the tool is unavailable, the paths are no longer readable, or analysis fails, still report
+   the measurements and deliver the original MEDIA line. Say visual inspection was unavailable
+   when relevant; never invent visual observations. Do not retry indefinitely or change model settings.
+7. Summarize observed features briefly, keeping them distinct from measured changes. All hectare
+   figures, dates, confidence and caveats must remain those returned by Overhead, not estimates
+   from `vision_analyze`. End the final reply with the original Overhead MEDIA line even after
+   using vision.
 
 ## Limits to explain when relevant
 

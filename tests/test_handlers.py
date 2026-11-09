@@ -24,7 +24,6 @@ def h(plugin, monkeypatch):
         *a, search=make_search(SCENES), reader=make_reader({}), **k))
     monkeypatch.setattr(mod, "run_timelapse", lambda *a, **k: pipeline.run_timelapse(
         *a, search=make_search(LAPSE_SCENES), reader=make_reader({}), **k))
-    monkeypatch.setattr(mod, "want_images", lambda: False)
     return mod
 
 
@@ -160,17 +159,24 @@ def test_compare_text_when_no_vision(tools):
     assert "thresholds" not in data  # kept in result.json
 
 
-def test_compare_envelope_when_vision(tools, h, monkeypatch):
-    monkeypatch.setattr(h, "want_images", lambda: True)
-    out = tools["overhead_compare"](dict(COMPARE))
-    assert isinstance(out, dict) and out["_multimodal"] is True
-    images = [p for p in out["content"] if p["type"] == "image_url"]
-    assert len(images) == 2
-    assert all(p["image_url"]["url"].startswith("data:image/jpeg;base64,") for p in images)
-    text = json.loads(out["content"][0]["text"])
-    assert text["deliver"].startswith("MEDIA:")
-    # the summary is what text-only providers and resumed sessions see: keep every number
-    assert out["text_summary"] == out["content"][0]["text"]
+def test_compare_offers_public_vision_requests_with_existing_images(tools):
+    from PIL import Image
+    raw = tools["overhead_compare"](dict(COMPARE))
+    assert isinstance(raw, str)
+    result = json.loads(raw)
+    assert "_multimodal" not in result and "content" not in result
+    vision = result["visual_analysis"]
+    assert vision["tool"] == "vision_analyze"
+    assert [r["image_url"] for r in vision["requests"]] == [
+        result["files"]["before"], result["files"]["after"]]
+    for request in vision["requests"]:
+        assert set(request) == {"image_url", "question"}
+        assert Path(request["image_url"]).is_absolute()
+        assert "Do not estimate hectares" in request["question"]
+        with Image.open(request["image_url"]) as image:
+            image.verify()
+    assert "latency and model costs" in vision["instruction"]
+    assert result["deliver"] == "MEDIA:" + result["files"]["panel"]
 
 
 def test_point_with_place_uses_place_as_title(plugin, tmp_path):
@@ -216,20 +222,40 @@ def test_schemas_bound_the_place_numbers_and_ask_for_result_numbers(plugin):
         assert "whole month" in schema["description"] and "its 15th" in schema["description"]
 
 
-def test_timelapse_delivers_gif_with_first_and_last_frame(tools, h, monkeypatch):
+def test_timelapse_delivers_gif_with_first_and_last_frame(tools):
+    from PIL import Image
     args = {"place": "x", "start": "2024-09-01", "end": "2024-12-31", "step": "month"}
     text = json.loads(tools["overhead_timelapse"](dict(args)))
     assert text["deliver"].endswith("timelapse.gif") and text["metric"] == "ndvi"
     assert len(text["series"]) == 4 and "frames" not in text["files"]
-    monkeypatch.setattr(h, "want_images", lambda: True)
-    env = tools["overhead_timelapse"](dict(args))
-    assert sum(p["type"] == "image_url" for p in env["content"]) == 2
-    assert env["text_summary"] == env["content"][0]["text"] and "timelapse.gif" in env["text_summary"]
+    paths = [r["image_url"] for r in text["visual_analysis"]["requests"]]
+    assert [Path(p).name for p in paths] == ["000.jpg", "003.jpg"]
+    for path in paths:
+        with Image.open(path) as image:
+            image.verify()
 
 
-def test_want_images_is_false_without_hermes(plugin, monkeypatch):
-    monkeypatch.setitem(sys.modules, "tools", None)  # makes "import tools.vision_tools" fail
-    assert plugin.handlers.want_images() is False
+def test_deliverable_needs_no_hermes_or_vision_backend(h, monkeypatch):
+    monkeypatch.setitem(sys.modules, "tools", None)
+    out = json.loads(h._deliverable({"headline": "Unchanged"}, "/panel.png", []))
+    assert out["headline"] == "Unchanged" and out["deliver"] == "MEDIA:/panel.png"
+    assert out["visual_analysis"]["requests"] == []
+    assert "without inventing visual details" in out["visual_analysis"]["instruction"]
+
+
+def test_deliverable_missing_preview_does_not_break_media(h, tmp_path, monkeypatch):
+    out = json.loads(h._deliverable({"stats": {"ha": 42}}, "/panel.png", [str(tmp_path / "missing.jpg")]))
+    assert out["stats"] == {"ha": 42} and out["visual_analysis"]["requests"] == []
+    monkeypatch.setattr(Path, "is_file", lambda self: (_ for _ in ()).throw(OSError("unreadable")))
+    out = json.loads(h._deliverable({}, "/panel.png", ["/unreadable.jpg"]))
+    assert out["deliver"] == "MEDIA:/panel.png" and out["visual_analysis"]["requests"] == []
+
+
+def test_single_frame_has_one_vision_request(tools):
+    out = json.loads(tools["overhead_timelapse"]({
+        "place": "x", "start": "2024-09", "end": "2024-09", "step": "month"}))
+    assert len(out["visual_analysis"]["requests"]) == 1
+    assert Path(out["visual_analysis"]["requests"][0]["image_url"]).name == "000.jpg"
 
 
 class FakeCtx:

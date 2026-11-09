@@ -1,7 +1,6 @@
 """Tool handlers: check the arguments, run the engine, shape the result for the model.
 
-Handlers never raise. They return a JSON string, or the multimodal envelope when the main model
-can see images in tool results.
+Handlers never raise. They return JSON with MEDIA delivery and optional public vision tool calls.
 """
 
 from __future__ import annotations
@@ -12,12 +11,9 @@ import logging
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image
-
 from .engine.aoi import resolution_for, resolve_aoi
 from .engine.errors import BadInput, OverheadError, to_error_dict
 from .engine.pipeline import parse_date, run_compare, run_scenes, run_timelapse
-from .engine.render import preview_data_url
 from .engine.runs import RunStore
 
 logger = logging.getLogger(__name__)
@@ -27,15 +23,6 @@ INSTRUCTION = "End your reply with this exact line: "
 
 class _Internal(OverheadError):
     type = "internal"
-
-
-def want_images() -> bool:
-    """True when the main model takes images in tool results (Hermes's own gate for this)."""
-    try:
-        from tools.vision_tools import _should_use_native_vision_fast_path
-        return bool(_should_use_native_vision_fast_path())
-    except Exception:
-        return False
 
 
 def _json(obj: dict) -> str:
@@ -86,29 +73,39 @@ def _side(side: dict) -> dict:
     return {k: side[k] for k in ("requested", "date", "clear_fraction", "composite", "scenes")}
 
 
-def _deliverable(payload: dict, media: str, previews: list[str]) -> str | dict:
-    """Add the deliver line; wrap in the multimodal envelope when the model can see images."""
+def _deliverable(payload: dict, media: str, previews: list[str]) -> str:
+    """Keep delivery textual; offer existing images to Hermes's public vision tool.
+
+    No vision call is made here. The agent can request visual interpretation when needed;
+    Hermes owns native/auxiliary routing, availability and any model usage.
+    """
     payload["deliver"] = f"MEDIA:{media}"
     payload["instruction"] = INSTRUCTION + payload["deliver"]
-    text = _json(payload)
-    if not want_images():
-        return text
-    try:
-        images = []
-        for path in previews:
-            with Image.open(path) as img:
-                images.append({"type": "image_url", "image_url": {"url": preview_data_url(img)}})
-    except Exception:
-        logger.warning("overhead: could not attach preview images", exc_info=True)
-        return text
-    return {
-        "_multimodal": True,
-        "content": [{"type": "text", "text": text}, *images],
-        "text_summary": text,  # what text-only providers and resumed sessions get: keep it all
+    requests = []
+    for path in dict.fromkeys(previews):
+        try:
+            if not Path(path).is_file():
+                continue
+            image_path = str(Path(path).resolve())
+        except OSError:
+            continue  # unavailable previews must not suppress measurements or MEDIA delivery
+        requests.append({
+            "image_url": image_path,
+            "question": "Describe visible land or water features and image limitations. "
+                        "Do not estimate hectares or replace the Overhead measurements.",
+        })
+    payload["visual_analysis"] = {
+        "tool": "vision_analyze", "requests": requests,
+        "instruction": "Optional: when visual interpretation is needed and vision_analyze is available, "
+                       "call it with these arguments. Hermes chooses native images or auxiliary vision; "
+                       "an extra call can add latency and model costs. If unavailable or unsuccessful, "
+                       "report the measurements and attach the MEDIA file without inventing visual details. "
+                       "Keep headline, statistics and notes from Overhead unchanged.",
     }
+    return _json(payload)
 
 
-def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
+def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str]]:
     cache_dir = Path(data_root) / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     store = RunStore(Path(data_root) / "runs")
@@ -161,8 +158,8 @@ def make_handlers(data_root: Path) -> dict[str, Callable[[dict], str | dict]]:
         ("overhead_compare", compare), ("overhead_timelapse", timelapse))}
 
 
-def _safe(fn: Callable[[dict], str | dict]) -> Callable[..., str | dict]:
-    def handler(args: dict, **kwargs) -> str | dict:
+def _safe(fn: Callable[[dict], str]) -> Callable[..., str]:
+    def handler(args: dict, **kwargs) -> str:
         try:
             return fn(args if isinstance(args, dict) else {})
         except OverheadError as e:

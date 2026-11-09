@@ -540,9 +540,8 @@ def test_timelapse_early_years_survive_newest_first_truncation(tmp_cache, tmp_pa
                       RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
     assert [s["period"] for s in r["series"]] == [str(y) for y in range(2018, 2026)]
     assert all(s["value"] is not None for s in r["series"])
-    assert len(search.calls) == 8 and all(c[2] <= 200 for c in search.calls)
-    note = next(n for n in r["notes"] if "matched more" in n)
-    assert "8 of 8 periods" in note and "newest 200" in note
+    assert len(search.calls) == 24 and all(c[2] == 200 for c in search.calls)
+    assert not any("incomplete" in n for n in r["notes"])
 
 
 def test_timelapse_searches_each_period_within_the_range(tmp_cache, tmp_path):
@@ -635,3 +634,55 @@ def test_timelapse_does_not_search_periods_after_today(tmp_cache, tmp_path):
                       search=search, reader=make_reader({}))
     assert [(s, e) for s, e, _, _ in search.calls] == [(first, TODAY)]  # no inverted ranges
     assert [s["value"] is None for s in r["series"]] == [False, True, True]
+
+
+def test_yearly_timelapse_can_select_january_and_keep_both_tiles(tmp_cache, tmp_path):
+    scenes = _every_other_day(date(2024, 1, 1), date(2024, 12, 31))
+    scenes = [replace(s, cloud_cover=0 if s.date == "2024-01-01" else 50) for s in scenes]
+    search = EarthSearch(scenes)
+    r = run_timelapse(AOI, date(2024, 1, 1), date(2024, 12, 31), "year", "ndvi", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
+    assert r["series"][0]["date"] == "2024-01-01"
+    assert len(r["provenance"]["items"]) == 2
+    assert not any("incomplete" in n for n in r["notes"])
+
+
+@pytest.mark.parametrize("counts", [True, False])
+def test_timelapse_window_recovers_every_item_without_splitting_dates(tmp_cache, counts):
+    from engine.pipeline import _search_timelapse_window
+    lo, hi = date(2024, 2, 15), date(2024, 3, 10)
+    scenes = _every_other_day(lo, hi, tiles=[str(i) for i in range(40)])
+    earth = EarthSearch(scenes)
+    def search(*args, **kwargs):
+        result = earth(*args, **kwargs)
+        if not counts:
+            result.matched = None
+        return result
+    result, cut = _search_timelapse_window(AOI, lo, hi, tmp_cache, search)
+    assert not cut
+    assert sorted(s.id for s in result) == sorted(s.id for s in scenes)
+    assert len({s.id for s in result}) == len(scenes)
+    assert any(s.date == "2024-02-29" for s in result)
+    assert all(lo <= start <= end <= hi for start, end, _, _ in earth.calls)
+
+
+def test_timelapse_window_does_not_split_exact_known_limit(tmp_cache):
+    from engine.pipeline import _search_timelapse_window
+    search = EarthSearch([scene("2024-01-01", tile=str(i)) for i in range(200)])
+    result, cut = _search_timelapse_window(AOI, date(2024, 1, 1), date(2024, 1, 31), tmp_cache, search)
+    assert len(result) == 200 and not cut
+    assert len(search.calls) == 1
+
+
+@pytest.mark.parametrize("counts", [True, False])
+def test_timelapse_saturated_single_day_stops_and_warns(tmp_cache, tmp_path, counts):
+    earth = EarthSearch([scene("2024-01-01", tile=str(i)) for i in range(201)])
+    def search(*args, **kwargs):
+        result = earth(*args, **kwargs)
+        if not counts:
+            result.matched = None
+        return result
+    r = run_timelapse(AOI, date(2024, 1, 1), date(2024, 1, 1), "year", "ndvi", tmp_cache,
+                      RunStore(tmp_path / "runs"), search=search, reader=make_reader({}))
+    assert len(earth.calls) == 1
+    assert any("1 of 1 periods may be incomplete" in n and "200-scene" in n for n in r["notes"])

@@ -172,3 +172,18 @@ def test_panel_does_not_blow_up_a_tall_thin_grid():
     im = Image.new("RGB", (5, 3000), (90, 120, 80))
     p = panel(im, im, im, "Strip", [], [])
     assert p.height < 3500
+
+
+def test_panel_preserves_whole_pixels_at_width_limit():
+    from engine.render import GAP, PAD, MAX_WIDTH
+    # At 286 px a 2x scale fits; 287..359 must stay native rather than stretch to 572.
+    for width in (7, 180, 286, 287, 300, 359, 360):
+        im = Image.new("RGB", (width, 20), (90, 120, 80))
+        im.putpixel((width // 2, 10), (255, 0, 0))
+        p = panel(im, im, im, "Grid", [], [])
+        pane_w = (p.width - 2 * PAD - 2 * GAP) // 3
+        assert p.width <= MAX_WIDTH
+        assert pane_w % width == 0
+        scale = pane_w // width
+        assert scale >= 1
+        assert (np.asarray(p) == (255, 0, 0)).all(axis=2).sum() == 3 * scale ** 2

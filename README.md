@@ -1,5 +1,9 @@
 # Overhead
 
+![Overhead: See change from above](assets/overhead-cover.png)
+
+*Illustrative cover artwork. Actual satellite outputs and Hermes Desktop captures follow below.*
+
 **What changed at this place between these dates?** Ask Hermes. Overhead answers in hectares,
 anywhere on Earth, from free Sentinel-2 satellite imagery, and shows you the picture.
 
@@ -8,8 +12,15 @@ anywhere on Earth, from free Sentinel-2 satellite imagery, and shows you the pic
 *Eaton fire, Altadena, California, 18 Dec 2024 → 21 Feb 2025: ≈ 3,449 ha burned, 910 ha of it at
 high severity. This is the real `overhead_compare` output for the first demo prompt below.*
 
-<!-- TODO: add the Hermes Desktop card screenshot here (assets/card.png, captured from Hermes.app):
-     the before/after swipe card with "Show change" on. Do not link it until the file exists. -->
+### In Hermes Desktop
+
+![Overhead comparison card running in Hermes Desktop](assets/hermes-comparison.jpg)
+
+![Overhead water timelapse card running in Hermes Desktop](assets/hermes-timelapse.jpg)
+
+*Real Desktop captures from the local demo. They show the rendered comparison and timelapse
+cards, not a claim that every native drag or external-map interaction was tested. The water
+series flags missing clear scenes and sun glint; see the limitations below.*
 
 - **A number, not a guess.** Hectares of vegetation lost and gained, area burned by severity,
   water gained and lost. The tool computes the totals from the pixels and hands them to the
@@ -103,8 +114,21 @@ the after image.
 | `overhead_compare` | **The main tool.** What changed between two dates: vegetation, burn and water. | `before`, `after`, `focus` (`auto`, `vegetation`, `burn`, `water`), `window_days` (1–120, default 30) | `headline`; stats in ha (vegetation lost/gained/net, burn low/moderate/high/burned, water before/after/lost/gained/net); confidence; resolution; the image dates and scene ids actually used; the STAC items (`provenance`); notes; the panel PNG and its layers; a `MEDIA:` line |
 | `overhead_timelapse` | How a place evolved: one frame per month, quarter or year (at most 24). | `start`, `end`, `step` (`month`, `quarter`, `year`), `metric` (`ndvi`, `water`, `burn`) | `headline`; a series per period (date, value, clear fraction, glint flag); the STAC items (`provenance`); the GIF and a chart PNG; notes; a `MEDIA:` line |
 
-When the model can read images, compare and timelapse also attach small previews (before and
-after, or the first and last frames), so it can describe what it sees.
+Compare and timelapse return JSON, not an internal multimodal envelope. Their `visual_analysis`
+field offers optional `vision_analyze` requests (`image_url` and `question`) for existing local
+before/after images or the first/last timelapse frames. When visual interpretation is needed,
+the earth-watch skill asks the agent to use this public Hermes tool. The panel, GIF and Desktop
+cards are still delivered normally; the previews are no longer attached automatically to the
+same tool result.
+
+This requires an available `vision_analyze` tool and a working native or auxiliary vision route.
+Hermes applies `agent.image_input_mode`, the configured `auxiliary.vision` backend and model/provider
+capabilities. Each requested image adds a tool call; native images consume model context, while
+auxiliary analysis can add a separate model request, latency and cost. Overhead does not invoke a
+vision model itself or change global routing. If vision is unavailable or fails, the agent reports
+the measurements and delivers the media without claiming to have inspected it. Visual descriptions
+must never replace the engine's hectare figures. First/last frames do not establish what happened
+in intermediate periods; use the numeric series and chart for that.
 
 Errors never raise. They come back as `{"error": {"type": ..., "message": ...}}`, with a message
 that says what to do next: `bad_input`, `place_not_found`, `ambiguous_place` (up to 5 candidates),
@@ -210,7 +234,7 @@ References:
 
 ## Disclosure
 
-Overhead makes these network calls and no others:
+Overhead's own data-service requests are:
 
 - **Earth Search STAC API by Element 84**, `https://earth-search.aws.element84.com/v1`: searches
   for `sentinel-2-l2a` scenes by the area's bounding box (never its exact outline) and the date
@@ -225,9 +249,16 @@ Overhead makes these network calls and no others:
 - **Optional:** the Desktop card's **Open map** button opens `https://www.openstreetmap.org/` at the
   area's bounding box in your browser, and only when you click it.
 
-Nothing else is sent anywhere. There are no API keys, no accounts and no telemetry. Overhead
-sends nothing from your conversation: these services see only the area's bounding box, the dates
-and, for a name lookup, the place name.
+Overhead itself makes only the data-service requests listed above and does not call a vision
+model. These data services receive only the area's bounding box, the dates and, for a name lookup,
+the place name, not the rest of your conversation.
+
+For optional visual interpretation, Overhead supplies local preview paths and questions for
+Hermes's public `vision_analyze` tool. If the agent uses it, Hermes may send the selected images
+and analysis prompt to the configured native or auxiliary model provider. Images may include
+location and date labels. Provider credentials, usage charges and privacy terms depend on your
+Hermes configuration. The plugin itself needs no API keys or accounts, stores no credentials and
+adds no telemetry.
 
 On disk, Overhead writes only to Hermes's plugin data folder, `<HERMES_HOME>/plugin-data/overhead/`
 (`~/.hermes/plugin-data/overhead/` by default). `cache/` holds the STAC answers, geocodes and image
@@ -249,7 +280,7 @@ Place names and boundaries: © OpenStreetMap contributors, under the
 ## Development
 
 ```bash
-python -m pytest -q                                         # 236 offline unit tests
+python -m pytest -q                                         # offline unit tests
 OVERHEAD_LIVE=1 python -m pytest tests/test_live.py -s      # the three demo scenes on live data
 npm ci && npm test && npm run typecheck && npm run build    # Desktop card: 31 tests, desktop/plugin.js
 hermes plugins validate .
@@ -257,9 +288,9 @@ hermes plugins validate .
 
 The Python tests need `rasterio`, `numpy`, `Pillow`, `pytest`, `fastapi` and `httpx`. Unit tests
 never touch the network. `demo/places.md` records the demo scenes, their exact tool arguments and
-timings. `hermes plugins validate` prints one warning: `handlers.py` imports Hermes's own
-native-vision check, read-only, to decide whether to attach image previews. If that import fails,
-the tools simply return text.
+timings. Visual-analysis requests use the public `vision_analyze` tool workflow; no private Hermes
+vision helper is imported. Unit tests verify the request arguments and readable local image paths
+without making model calls.
 
 ## License
 
